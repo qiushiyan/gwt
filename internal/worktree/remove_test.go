@@ -112,7 +112,7 @@ func TestRemoveReportsPartialFailure(t *testing.T) {
 	if err == nil || result.OK || !result.WorktreeRemoved || result.BranchDeleted {
 		t.Fatalf("%+v %v", result, err)
 	}
-	if !strings.Contains(err.Error(), "branch") {
+	if !strings.Contains(err.Error(), "worktree removed") || !strings.Contains(err.Error(), "inspect git branch -v") {
 		t.Fatal(err)
 	}
 }

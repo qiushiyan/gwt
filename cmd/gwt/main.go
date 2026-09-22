@@ -22,23 +22,24 @@ const help = `Usage: gwt [create] <branch> [base] [options]
        gwt remove <branch> [--force] [--json]
        gwt config show [--json]
 
-Place a branch in <worktree_root>/<main-checkout>/<branch>.
-Print only the absolute path on stdout; diagnostics go to stderr.
+Create and remove Git worktrees; inspect branch resolution and configuration.
+Creation places branches in <worktree_root>/<main-checkout>/<branch> and prints
+the absolute path, or one JSON object with --json. Diagnostics go to stderr.
 The binary never changes your shell's directory or installs dependencies.
 
 An existing local branch is checked out as-is; a unique remote branch becomes
 a tracking branch. Otherwise create a branch from base (config default: HEAD).
 Only an implicit HEAD base asks for confirmation; concrete configured refs do not.
 
-Options (before or after arguments):
+Options (create unless marked otherwise; before or after arguments):
   -n, --non-interactive  Use the configured base without asking
   -y, --yes              Alias for --non-interactive
   --force               remove: allow an unmerged branch; dirty/locked trees still fail
   --new                 Create even if a remote branch has the same name
   --no-copy             Skip copying ignored prerequisites from the main checkout
-  --no-fetch            Resolve only against locally cached refs
-  --json                Print one JSON object instead of the path/verdict
-  -h, --help            Show help
+  --no-fetch            create/resolve: use locally cached refs
+  --json                All commands: print one JSON object
+  -h, --help            All commands: show help
 
 By default, an absent branch name triggers a bounded refresh of stale remote
 refs. Fetch failure warns and uses cached refs. Git authentication is unattended.
@@ -64,7 +65,11 @@ remove deletes the registered checkout and its local branch, without prompting.
 It protects main/current worktrees and refuses dirt. Without --force, the branch
 must be an ancestor of the configured base and pass git branch -d. It does not
 fetch or recognize squash merges. Ignored files are removed with the checkout.
-remove --json reports ok, worktree_removed, branch_deleted, and errors even on failure.
+remove --json reports ok, worktree_removed, branch_deleted, and error on operational
+failure. After partial removal, inspect the remaining branch before deleting it
+directly; retrying remove cannot find a checkout that was already removed.
+Exit codes: 0 success, 1 operational failure/declined creation, 2 invalid arguments.
+Invalid arguments print diagnostics on stderr, including with --json.
 WORKTREE_COPY_GLOBS and WT_* environment settings are no longer used by gwt.
 `
 

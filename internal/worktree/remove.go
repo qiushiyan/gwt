@@ -48,7 +48,7 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 			continue
 		}
 		if result.Path != "" {
-			return result, fmt.Errorf("branch %q is checked out in multiple worktrees; remove the extra registrations manually", branch)
+			return result, fmt.Errorf("branch %q is checked out in multiple worktrees; inspect git worktree list before choosing a checkout to remove", branch)
 		}
 		result.Path = path
 		if locked {
@@ -56,7 +56,7 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 		}
 	}
 	if result.Path == "" {
-		return result, fmt.Errorf("no registered worktree for branch %q", branch)
+		return result, fmt.Errorf("no registered worktree for branch %q; inspect git worktree list and git branch --list before choosing a cleanup action", branch)
 	}
 	path, err := filepath.EvalSymlinks(result.Path)
 	if err != nil {
@@ -105,7 +105,7 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 		flag = "-D"
 	}
 	if _, err := git(ctx, r.dir, "branch", flag, "--", branch); err != nil {
-		return result, fmt.Errorf("worktree removed, but branch %q remains: %w", branch, err)
+		return result, fmt.Errorf("worktree removed, but branch %q remains: %w; inspect git branch -v and resolve the deletion error before deleting the branch directly", branch, err)
 	}
 	result.BranchDeleted, result.OK = true, true
 	// Clean only empty parents under the current configured root. A worktree

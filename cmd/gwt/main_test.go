@@ -157,6 +157,7 @@ func TestInvalidArguments(t *testing.T) {
 		{}, {"--bogus"}, {"create"}, {"a", "b", "c"}, {"resolve", "a", "b"},
 		{"resolve", "a", "--new"}, {"resolve", "a", "--no-copy"},
 		{"config"}, {"config", "show", "--no-fetch"}, {"path", "a", "b"}, {"create", "a", "--force"}, {"remove"}, {"remove", "a", "b"},
+		{"remove", "a", "b", "--json"},
 	} {
 		var out, stderr bytes.Buffer
 		if rc := run(context.Background(), args, strings.NewReader(""), &out, &stderr); rc != 2 || out.Len() != 0 {
