@@ -11,7 +11,7 @@ Requires Go 1.25+, Git, and `cp` on macOS or Linux. TOML decoding uses BurntSush
 
 ```sh
 make check
-make install                    # ~/.local/bin/gwt; put ~/.local/bin on PATH
+make install                    # installs to ~/.local/bin; keep that directory on PATH
 gwt fix/login main              # explicit base, no confirmation
 gwt feat/search                 # confirm forking from current HEAD
 gwt create -n feat/agent-work    # unattended; stdout is only the path
@@ -22,7 +22,7 @@ gwt --help
 The binary does not change the caller's directory. The dotfiles `gwtcd` helper
 captures its path and changes the parent shell's directory. Agents use the
 returned path as their working directory. An existing shell may still hold the
-old `gwt` function; run `zshreload` once or invoke `~/.local/bin/gwt` directly.
+old `gwt` function; run `zshreload` once to pick up the binary.
 
 Command names are reserved in the first position. To create a branch named
 `remove`, for example, use `gwt create remove`.
