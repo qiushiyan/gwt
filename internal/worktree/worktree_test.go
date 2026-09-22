@@ -85,7 +85,7 @@ func write(t *testing.T, p, content string, mode os.FileMode) {
 	}
 }
 
-func TestCreateCurrentExplicitAndLinked(t *testing.T) {
+func TestCreateFromCurrentBranchWithoutTracking(t *testing.T) {
 	f := setup(t)
 	f.mustGit(f.dir, "checkout", "-qb", "topic")
 	f.mustGit(f.dir, "commit", "-qm", "topic", "--allow-empty")
@@ -405,5 +405,30 @@ func TestGitStderrDoesNotPolluteResult(t *testing.T) {
 	x := f.create(Options{Branch: "hook"})
 	if strings.Contains(x.Path, "noisy") {
 		t.Fatal(x)
+	}
+}
+
+func TestLinkedCreationUsesCallerHeadAndMainPrerequisites(t *testing.T) {
+	f := setup(t)
+	write(t, filepath.Join(f.dir, ".gitignore"), ".env\n", 0644)
+	f.mustGit(f.dir, "add", ".gitignore")
+	f.mustGit(f.dir, "commit", "-qm", "ignore prerequisite")
+	caller := f.create(Options{Branch: "topic"})
+	f.mustGit(caller.Path, "commit", "--allow-empty", "-qm", "topic work")
+	write(t, filepath.Join(f.dir, ".env"), "main prerequisite", 0600)
+	r, err := Open(context.Background(), caller.Path, f.home, &f.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := r.Create(context.Background(), Options{Branch: "next-topic", NonInteractive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Base != "topic" || f.mustGit(result.Path, "rev-parse", "HEAD") != f.mustGit(caller.Path, "rev-parse", "HEAD") {
+		t.Fatalf("caller HEAD ignored: %+v", result)
+	}
+	data, err := os.ReadFile(filepath.Join(result.Path, ".env"))
+	if err != nil || string(data) != "main prerequisite" {
+		t.Fatalf("main seeding: %q %v", data, err)
 	}
 }

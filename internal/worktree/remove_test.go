@@ -116,3 +116,96 @@ func TestRemoveReportsPartialFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRemoveRecognizesMergeStyles(t *testing.T) {
+	for _, style := range []string{"merge", "squash", "rebase", "unmerged"} {
+		t.Run(style, func(t *testing.T) {
+			f := setup(t)
+			x := f.create(Options{Branch: "feature"})
+			write(t, filepath.Join(x.Path, "feature"), "one\n", 0644)
+			f.mustGit(x.Path, "add", "feature")
+			f.mustGit(x.Path, "commit", "-qm", "one")
+			first := f.mustGit(x.Path, "rev-parse", "HEAD")
+			write(t, filepath.Join(x.Path, "feature"), "one\ntwo\n", 0644)
+			f.mustGit(x.Path, "commit", "-qam", "two")
+			second := f.mustGit(x.Path, "rev-parse", "HEAD")
+			write(t, filepath.Join(f.dir, "unrelated"), "main advanced", 0644)
+			f.mustGit(f.dir, "add", "unrelated")
+			f.mustGit(f.dir, "commit", "-qm", "advance main")
+			switch style {
+			case "merge":
+				f.mustGit(f.dir, "merge", "--no-ff", "-qm", "merge feature", "feature")
+			case "squash":
+				f.mustGit(f.dir, "merge", "--squash", "feature")
+				f.mustGit(f.dir, "commit", "-qm", "squash feature")
+			case "rebase":
+				f.mustGit(f.dir, "cherry-pick", first, second)
+			}
+			result, err := f.r.Remove(context.Background(), "feature", false)
+			if style == "unmerged" {
+				if err == nil || result.WorktreeRemoved || result.BranchDeleted {
+					t.Fatalf("unmerged content removed: %+v %v", result, err)
+				}
+				return
+			}
+			if err != nil || !result.OK {
+				t.Fatalf("%+v %v", result, err)
+			}
+		})
+	}
+}
+
+func TestRemoveUsesMainCheckoutBase(t *testing.T) {
+	f := setup(t)
+	caller := f.create(Options{Branch: "older-topic"})
+	target := f.create(Options{Branch: "merged"})
+	f.mustGit(target.Path, "commit", "--allow-empty", "-qm", "merged commit")
+	f.mustGit(f.dir, "merge", "--ff-only", "merged")
+	r, err := Open(context.Background(), caller.Path, f.home, &f.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := r.Remove(context.Background(), "merged", false)
+	if err != nil || !result.OK {
+		t.Fatalf("%+v %v", result, err)
+	}
+}
+
+func TestRemovePrunableRegistration(t *testing.T) {
+	f := setup(t)
+	x := f.create(Options{Branch: "missing"})
+	if err := os.RemoveAll(x.Path); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.r.Remove(context.Background(), "missing", false)
+	if err != nil || !result.OK || !result.WorktreeRemoved || !result.BranchDeleted {
+		t.Fatalf("%+v %v", result, err)
+	}
+	if strings.Contains(f.mustGit(f.dir, "worktree", "list", "--porcelain"), "refs/heads/missing") {
+		t.Fatal("registration remains")
+	}
+}
+
+func TestRemovePreservesChangesIntroducedByMergeCommit(t *testing.T) {
+	f := setup(t)
+	feature := f.create(Options{Branch: "feature"})
+	side := f.create(Options{Branch: "side"})
+	write(t, filepath.Join(feature.Path, "feature"), "feature", 0644)
+	f.mustGit(feature.Path, "add", "feature")
+	f.mustGit(feature.Path, "commit", "-qm", "feature change")
+	featureTip := f.mustGit(feature.Path, "rev-parse", "HEAD")
+	write(t, filepath.Join(side.Path, "side"), "side", 0644)
+	f.mustGit(side.Path, "add", "side")
+	f.mustGit(side.Path, "commit", "-qm", "side change")
+	sideTip := f.mustGit(side.Path, "rev-parse", "HEAD")
+	f.mustGit(feature.Path, "merge", "--no-ff", "--no-commit", "side")
+	write(t, filepath.Join(feature.Path, "merge-only"), "keep this merge edit", 0644)
+	f.mustGit(feature.Path, "add", "merge-only")
+	f.mustGit(feature.Path, "commit", "-qm", "merge with additional edits")
+	// All non-merge commits are replayed; the merge commit's own edit is not.
+	f.mustGit(f.dir, "cherry-pick", featureTip, sideTip)
+	result, err := f.r.Remove(context.Background(), "feature", false)
+	if err == nil || result.WorktreeRemoved || result.BranchDeleted {
+		t.Fatalf("merge-only work discarded: %+v %v", result, err)
+	}
+}

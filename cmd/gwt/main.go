@@ -49,7 +49,6 @@ Examples:
   gwt fix/login main
   gwt create --non-interactive feat/search
   gwt create feat/search origin/main --json --non-interactive
-  gwtcd fix/login main                 # optional zsh helper: create and cd
 
 Configuration (CLI arguments override repository config, then global defaults):
   Global      $XDG_CONFIG_HOME/gwt/config.toml or ~/.config/gwt/config.toml
@@ -62,15 +61,17 @@ Duration values use units, e.g. "5m" and "8s". Paths accept ~/ but no shell expa
 config show reports effective values and sources; JSON durations are seconds.
 path prints the intended path without fetching or writing; omit branch for its root.
 remove deletes the registered checkout and its local branch, without prompting.
-It protects main/current worktrees and refuses dirt. Without --force, the branch
-must be an ancestor of the configured base and pass git branch -d. It does not
-fetch or recognize squash merges. Ignored files are removed with the checkout.
+It protects main/current worktrees and refuses dirt. Without --force, branch work
+must be integrated by ancestry or matching squash/rebase patches. The configured
+base is resolved in the MAIN checkout for removal (HEAD means that checkout's
+current branch); creation still uses the caller's HEAD. Removal does not fetch.
+Missing checkout directories can be cleaned from Git's registrations.
+Ignored files are removed with the checkout.
 remove --json reports ok, worktree_removed, branch_deleted, and error on operational
 failure. After partial removal, inspect the remaining branch before deleting it
 directly; retrying remove cannot find a checkout that was already removed.
 Exit codes: 0 success, 1 operational failure/declined creation, 2 invalid arguments.
 Invalid arguments print diagnostics on stderr, including with --json.
-WORKTREE_COPY_GLOBS and WT_* environment settings are no longer used by gwt.
 `
 
 type options struct {

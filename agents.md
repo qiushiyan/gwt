@@ -1,9 +1,9 @@
 # Working on gwt
 
-Personal CLI. Keep changes proportional to demonstrated failures or requested features.
+Personal CLI to work with git worktrees. Keep changes proportional to demonstrated failures or requested features.
 
 - Contract changes cross repos: check `~/dev/brief`, `~/dotfiles/zsh`,
-  `~/dotfiles/tmux`, and `~/dotfiles/claude/.claude/skills/enter-worktree`.
+  `~/dotfiles/tmux`, and `~/dotfiles/claude/.claude/skills/{enter-worktree,clean-worktrees}`.
   Callers share gwt's configuration; tmux owns its separate interactive cleanup.
 - Integration tests need temporary homes, config, and repositories. Live defaults
   reach real worktrees; isolate tmux sockets and clipboard commands too.

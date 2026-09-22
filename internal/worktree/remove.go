@@ -59,7 +59,10 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 		return result, fmt.Errorf("no registered worktree for branch %q; inspect git worktree list and git branch --list before choosing a cleanup action", branch)
 	}
 	path, err := filepath.EvalSymlinks(result.Path)
-	if err != nil {
+	missing := os.IsNotExist(err)
+	if missing {
+		path = filepath.Clean(result.Path)
+	} else if err != nil {
 		return result, fmt.Errorf("cannot access registered worktree %s: %w", result.Path, err)
 	}
 	main, err := filepath.EvalSymlinks(r.main)
@@ -76,23 +79,36 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 	if cwd == path || strings.HasPrefix(cwd, path+string(filepath.Separator)) {
 		return result, fmt.Errorf("refusing to remove the current worktree; run gwt remove from another checkout")
 	}
-	status, err := git(ctx, path, "status", "--porcelain", "--untracked-files=all")
-	if err != nil {
-		return result, err
-	}
-	if status != "" {
-		return result, fmt.Errorf("worktree has uncommitted or untracked changes: %s; commit or move them before removal", path)
-	}
-	if !force {
-		if _, err := git(ctx, r.dir, "rev-parse", "--verify", "--end-of-options", r.config.Base+"^{commit}"); err != nil {
+	if !missing {
+		status, err := git(ctx, path, "status", "--porcelain", "--untracked-files=all")
+		if err != nil {
 			return result, err
 		}
-		if _, err := git(ctx, r.dir, "merge-base", "--is-ancestor", "refs/heads/"+branch, r.config.Base); err != nil {
-			var exit *exec.ExitError
-			if errors.As(err, &exit) && exit.ExitCode() == 1 {
-				return result, fmt.Errorf("branch %q is not an ancestor of %s (squash merges also fail this check); use --force only to discard the branch's commits", branch, r.config.Base)
-			}
+		if status != "" {
+			return result, fmt.Errorf("worktree has uncommitted or untracked changes: %s; commit or move them before removal", path)
+		}
+	}
+	if !force {
+		// HEAD as a creation base is caller-relative; cleanup measures integration
+		// against the main checkout so changing the caller cannot change the verdict.
+		base, err := git(ctx, r.main, "rev-parse", "--verify", "--end-of-options", r.config.Base+"^{commit}")
+		if err != nil {
 			return result, err
+		}
+		tip, err := git(ctx, r.dir, "rev-parse", "--verify", "refs/heads/"+branch)
+		if err != nil {
+			return result, err
+		}
+		merged, err := r.mergedInto(ctx, tip, base)
+		if err != nil {
+			return result, err
+		}
+		if !merged {
+			name, err := git(ctx, r.main, "rev-parse", "--abbrev-ref", r.config.Base)
+			if err != nil {
+				return result, err
+			}
+			return result, fmt.Errorf("branch %q has work not confirmed in %s (%s); inspect git log --oneline %s..%s and the branch diff before using --force to discard it", branch, name, base[:12], base, tip)
 		}
 	}
 	// Git rechecks dirt, locking, and registration immediately before removal.
@@ -100,11 +116,9 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 		return result, err
 	}
 	result.WorktreeRemoved = true
-	flag := "-d"
-	if force {
-		flag = "-D"
-	}
-	if _, err := git(ctx, r.dir, "branch", flag, "--", branch); err != nil {
+	// Patch-equivalent squash/rebase merges need -D: Git branch -d only checks
+	// ancestry. The integration check above owns this decision.
+	if _, err := git(ctx, r.dir, "branch", "-D", "--", branch); err != nil {
 		return result, fmt.Errorf("worktree removed, but branch %q remains: %w; inspect git branch -v and resolve the deletion error before deleting the branch directly", branch, err)
 	}
 	result.BranchDeleted, result.OK = true, true
@@ -119,4 +133,58 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 		}
 	}
 	return result, nil
+}
+
+// mergedInto recognizes ancestry, squash merges, and replayed commits, in that
+// order. Empty net changes do not prove integration of unmerged commits.
+func (r *Repo) mergedInto(ctx context.Context, branch, base string) (bool, error) {
+	if _, err := git(ctx, r.dir, "merge-base", "--is-ancestor", branch, base); err == nil {
+		return true, nil
+	} else {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return false, err
+		}
+	}
+	ancestor, err := git(ctx, r.dir, "merge-base", base, branch)
+	if err != nil {
+		return false, err
+	}
+	tree, err := git(ctx, r.dir, "rev-parse", branch+"^{tree}")
+	if err != nil {
+		return false, err
+	}
+	ancestorTree, err := git(ctx, r.dir, "rev-parse", ancestor+"^{tree}")
+	if err != nil || tree == ancestorTree {
+		return false, err
+	}
+	// This temporary object gives git cherry the branch's combined patch without
+	// changing any ref. It needs neither the user's identity nor commit signing.
+	squash, err := git(ctx, r.dir, "-c", "user.name=gwt", "-c", "user.email=gwt@localhost", "-c", "commit.gpgSign=false", "commit-tree", tree, "-p", ancestor, "-m", "gwt integration check")
+	if err != nil {
+		return false, err
+	}
+	out, err := git(ctx, r.dir, "cherry", base, squash)
+	if err != nil {
+		return false, err
+	}
+	if strings.HasPrefix(out, "- ") {
+		return true, nil
+	}
+	// git cherry omits merge commits. Matching their parents' patches cannot
+	// prove that edits made in the merge itself reached the base.
+	merges, err := git(ctx, r.dir, "rev-list", "--merges", base+".."+branch)
+	if err != nil || merges != "" {
+		return false, err
+	}
+	out, err = git(ctx, r.dir, "cherry", base, branch)
+	if err != nil || out == "" {
+		return false, err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "- ") {
+			return false, nil
+		}
+	}
+	return true, nil
 }

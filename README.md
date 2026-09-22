@@ -110,10 +110,13 @@ branch, even after the configured root changes. It deletes the checkout and
 then the branch. Main, current, locked, dirty, and untracked worktrees are
 protected. Ignored files, including seeded prerequisites, go with the checkout.
 
-Without `--force`, the branch must be an ancestor of the configured base
-(`HEAD` by default) and pass Git's normal `branch -d` check. This uses local
-refs, without fetching or recognizing squash merges. `--force` permits
-discarding unmerged commits; it does not bypass checkout protections.
+Without `--force`, branch work must be integrated into the configured base by
+ancestry or matching squash/rebase patches. Removal resolves the base in the
+**main checkout**, so `HEAD` means its current branch regardless of the caller.
+Creation still uses the caller's HEAD. These checks use local refs without fetching.
+Unconfirmed work stays in place; `--force` permits discarding it while retaining
+checkout protections. A registered worktree whose directory is already missing
+can still be removed along with its branch.
 
 Success exits 0; operational failure exits 1. JSON reports both steps so an
 agent can distinguish refusal from partial completion:
