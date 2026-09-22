@@ -10,19 +10,9 @@ import (
 )
 
 func (r *Repo) seed(ctx context.Context, dest string) (int, []string) {
-	globs := os.Getenv("WORKTREE_COPY_GLOBS")
-	switch globs {
-	case "off", "none", "no", "0", "false", "disabled":
+	patterns := r.config.CopyGlobs
+	if len(patterns) == 0 {
 		return 0, nil
-	}
-	if globs == "" {
-		globs = ".env* .npmrc scripts.local .duet docs.local"
-	}
-	patterns := strings.Fields(globs)
-	for _, p := range patterns {
-		if _, err := filepath.Match(p, ""); err != nil {
-			return 0, []string{fmt.Sprintf("invalid copy glob %q: %v", p, err)}
-		}
 	}
 	files, err := git(ctx, r.main, "ls-files", "-oi", "--exclude-standard", "--directory", "-z")
 	if err != nil {

@@ -2,24 +2,29 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/qiushiyan/gwt/internal/config"
 )
+
+var ErrNotRepository = errors.New("not inside a Git working tree")
 
 type Repo struct {
 	dir, main, root, common string
 	stderr                  io.Writer
+	config                  config.Config
 }
 
 func Open(ctx context.Context, dir, home string, stderr io.Writer) (*Repo, error) {
 	inside, err := git(ctx, dir, "rev-parse", "--is-inside-work-tree")
 	if err != nil || inside != "true" {
-		return nil, fmt.Errorf("not inside a Git working tree: %s", dir)
+		return nil, fmt.Errorf("%w: %s", ErrNotRepository, dir)
 	}
 	list, err := git(ctx, dir, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
@@ -34,7 +39,11 @@ func Open(ctx context.Context, dir, home string, stderr io.Writer) (*Repo, error
 	if err != nil {
 		return nil, err
 	}
-	return &Repo{dir: dir, main: main, common: common, root: filepath.Join(home, "dev", ".worktrees", filepath.Base(main)), stderr: stderr}, nil
+	cfg, err := config.Load(home, common)
+	if err != nil {
+		return nil, err
+	}
+	return &Repo{dir: dir, main: main, common: common, root: filepath.Join(cfg.WorktreeRoot, filepath.Base(main)), stderr: stderr, config: cfg}, nil
 }
 
 type Verdict struct {
@@ -87,12 +96,18 @@ func (r *Repo) resolve(ctx context.Context, branch string) (Verdict, error) {
 	return v, nil
 }
 
-func envDuration(name string, fallback float64, unit time.Duration) time.Duration {
-	f, err := strconv.ParseFloat(os.Getenv(name), 64)
-	if err != nil || f <= 0 || f > 86400 {
-		f = fallback
+func (r *Repo) Configuration() config.Config { return r.config }
+
+// Path computes placement without fetching, creating directories, or requiring
+// a free slot. Callers use it to diagnose existing worktrees before creation.
+func (r *Repo) Path(ctx context.Context, branch string) (string, error) {
+	if branch == "" {
+		return r.root, nil
 	}
-	return time.Duration(f * float64(unit))
+	if err := r.validate(ctx, branch); err != nil {
+		return "", err
+	}
+	return filepath.Join(r.root, branch), nil
 }
 
 func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict, error) {
@@ -104,7 +119,7 @@ func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict,
 		return v, err
 	}
 	info, err := os.Stat(filepath.Join(r.common, "FETCH_HEAD"))
-	if err == nil && info.Size() > 0 && time.Since(info.ModTime()) < envDuration("WT_BASE_MAX_AGE_MIN", 5, time.Minute) {
+	if err == nil && info.Size() > 0 && time.Since(info.ModTime()) < r.config.Fetch.MaxAge {
 		return v, nil
 	}
 	remotes, err := git(ctx, r.dir, "remote")
@@ -115,7 +130,7 @@ func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict,
 		return v, nil
 	}
 	fmt.Fprintf(r.stderr, "gwt: no branch %q found; refreshing remote refs…\n", branch)
-	fetchCtx, cancel := context.WithTimeout(ctx, envDuration("WT_FETCH_TIMEOUT", 8, time.Second))
+	fetchCtx, cancel := context.WithTimeout(ctx, r.config.Fetch.Timeout)
 	defer cancel()
 	// Refresh all configured remotes, including a newly added remote without
 	// tracking refs yet, so ambiguous names cannot silently become new branches.
@@ -177,6 +192,9 @@ func (r *Repo) Create(ctx context.Context, o Options) (Result, error) {
 	default:
 		base := o.Base
 		if base == "" {
+			base = r.config.Base
+		}
+		if base == "HEAD" && o.Base == "" {
 			base, err = git(ctx, r.dir, "rev-parse", "--abbrev-ref", "HEAD")
 			if err != nil {
 				return Result{}, err

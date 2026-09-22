@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,23 +12,28 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/qiushiyan/gwt/internal/config"
 	"github.com/qiushiyan/gwt/internal/worktree"
 )
 
 const help = `Usage: gwt [create] <branch> [base] [options]
        gwt resolve <branch> [--no-fetch] [--json]
+       gwt path [branch] [--json]
+       gwt remove <branch> [--force] [--json]
+       gwt config show [--json]
 
-Place a branch in ~/dev/.worktrees/<main-checkout>/<branch>.
+Place a branch in <worktree_root>/<main-checkout>/<branch>.
 Print only the absolute path on stdout; diagnostics go to stderr.
 The binary never changes your shell's directory or installs dependencies.
 
 An existing local branch is checked out as-is; a unique remote branch becomes
-a tracking branch. Otherwise create a branch from base (default: current HEAD).
-Without an explicit base, creating a branch asks for confirmation.
+a tracking branch. Otherwise create a branch from base (config default: HEAD).
+Only an implicit HEAD base asks for confirmation; concrete configured refs do not.
 
 Options (before or after arguments):
-  -n, --non-interactive  Use current HEAD without asking when base is omitted
+  -n, --non-interactive  Use the configured base without asking
   -y, --yes              Alias for --non-interactive
+  --force               remove: allow an unmerged branch; dirty/locked trees still fail
   --new                 Create even if a remote branch has the same name
   --no-copy             Skip copying ignored prerequisites from the main checkout
   --no-fetch            Resolve only against locally cached refs
@@ -44,22 +50,34 @@ Examples:
   gwt create feat/search origin/main --json --non-interactive
   gwtcd fix/login main                 # optional zsh helper: create and cd
 
-Environment:
-  WORKTREE_COPY_GLOBS  Basename globs separated by whitespace; "off" disables
-                      Default: .env* .npmrc scripts.local .duet docs.local
-  WT_BASE_MAX_AGE_MIN  Fetch freshness in minutes (default 5)
-  WT_FETCH_TIMEOUT     Fetch deadline in seconds (default 8)
+Configuration (CLI arguments override repository config, then global defaults):
+  Global      $XDG_CONFIG_HOME/gwt/config.toml or ~/.config/gwt/config.toml
+  Repository  gwt.toml inside the shared Git directory (usually .git/gwt.toml)
+  GWT_CONFIG  Use this absolute path instead of the global config file
+
+Keys: base, worktree_root, copy_globs, fetch.max_age, fetch.timeout.
+Arrays replace inherited arrays; copy_globs = [] disables copying.
+Duration values use units, e.g. "5m" and "8s". Paths accept ~/ but no shell expansion.
+config show reports effective values and sources; JSON durations are seconds.
+path prints the intended path without fetching or writing; omit branch for its root.
+remove deletes the registered checkout and its local branch, without prompting.
+It protects main/current worktrees and refuses dirt. Without --force, the branch
+must be an ancestor of the configured base and pass git branch -d. It does not
+fetch or recognize squash merges. Ignored files are removed with the checkout.
+remove --json reports ok, worktree_removed, branch_deleted, and errors even on failure.
+WORKTREE_COPY_GLOBS and WT_* environment settings are no longer used by gwt.
 `
 
 type options struct {
 	command, branch, base                      string
 	yes, forceNew, noCopy, noFetch, json, help bool
+	force                                      bool
 }
 
 // A small parser keeps the old interspersed flag syntax without a CLI framework.
 func parse(args []string) (options, error) {
 	o := options{command: "create"}
-	if len(args) > 0 && (args[0] == "create" || args[0] == "resolve") {
+	if len(args) > 0 && (args[0] == "create" || args[0] == "resolve" || args[0] == "path" || args[0] == "config" || args[0] == "remove") {
 		o.command, args = args[0], args[1:]
 	}
 	var positional []string
@@ -75,6 +93,9 @@ func parse(args []string) (options, error) {
 				continue
 			case "-n", "--non-interactive", "-y", "--yes":
 				o.yes = true
+				continue
+			case "--force":
+				o.force = true
 				continue
 			case "--new":
 				o.forceNew = true
@@ -98,18 +119,35 @@ func parse(args []string) (options, error) {
 	if o.help {
 		return o, nil
 	}
-	if len(positional) == 0 {
-		return o, fmt.Errorf("branch name required (see gwt --help)")
+	if o.force && o.command != "remove" {
+		return o, fmt.Errorf("--force is only for remove")
 	}
-	if len(positional) > 2 || (o.command == "resolve" && len(positional) != 1) {
-		return o, fmt.Errorf("too many arguments for %s", o.command)
+	if o.command != "create" && (o.forceNew || o.noCopy || o.yes || (o.noFetch && o.command != "resolve")) {
+		return o, fmt.Errorf("unsupported option for %s", o.command)
 	}
-	if o.command == "resolve" && (o.forceNew || o.noCopy || o.yes) {
-		return o, fmt.Errorf("resolve accepts only --no-fetch and --json")
-	}
-	o.branch = positional[0]
-	if len(positional) == 2 {
-		o.base = positional[1]
+	switch o.command {
+	case "config":
+		if len(positional) != 1 || positional[0] != "show" {
+			return o, fmt.Errorf("use gwt config show [--json]")
+		}
+	case "path":
+		if len(positional) > 1 {
+			return o, fmt.Errorf("path accepts at most one branch")
+		}
+		if len(positional) == 1 {
+			o.branch = positional[0]
+		}
+	default:
+		if len(positional) == 0 {
+			return o, fmt.Errorf("branch name required (see gwt --help)")
+		}
+		if len(positional) > 2 || ((o.command == "resolve" || o.command == "remove") && len(positional) != 1) {
+			return o, fmt.Errorf("too many arguments for %s", o.command)
+		}
+		o.branch = positional[0]
+		if len(positional) == 2 {
+			o.base = positional[1]
+		}
 	}
 	return o, nil
 }
@@ -125,19 +163,76 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 		return 0
 	}
 	cwd, err := os.Getwd()
+	var home string
+	var r *worktree.Repo
+	if err == nil {
+		home, err = os.UserHomeDir()
+	}
+	if err == nil {
+		r, err = worktree.Open(ctx, cwd, home, stderr)
+	}
+	if o.command == "remove" {
+		result := worktree.Removal{Branch: o.branch}
+		if err == nil {
+			result, err = r.Remove(ctx, o.branch, o.force)
+		}
+		if err != nil {
+			result.Error = err.Error()
+		}
+		if o.json {
+			if outErr := json.NewEncoder(out).Encode(result); outErr != nil {
+				fmt.Fprintln(stderr, "gwt:", outErr)
+				return 1
+			}
+		} else if err == nil {
+			fmt.Fprintf(out, "Removed worktree %s and branch %s\n", result.Path, result.Branch)
+		}
+		if err != nil {
+			fmt.Fprintln(stderr, "gwt:", err)
+			return 1
+		}
+		return 0
+	}
+	if o.command == "config" {
+		var cfg config.Config
+		if errors.Is(err, worktree.ErrNotRepository) {
+			cfg, err = config.Load(home, "")
+		} else if err == nil {
+			cfg = r.Configuration()
+		}
+		if err == nil {
+			if o.json {
+				err = json.NewEncoder(out).Encode(cfg)
+			} else {
+				err = cfg.Show(out)
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(stderr, "gwt:", err)
+			return 1
+		}
+		return 0
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "gwt:", err)
 		return 1
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintln(stderr, "gwt:", err)
-		return 1
-	}
-	r, err := worktree.Open(ctx, cwd, home, stderr)
-	if err != nil {
-		fmt.Fprintln(stderr, "gwt:", err)
-		return 1
+	if o.command == "path" {
+		dest, err := r.Path(ctx, o.branch)
+		if err == nil {
+			if o.json {
+				err = json.NewEncoder(out).Encode(struct {
+					Path string `json:"path"`
+				}{dest})
+			} else {
+				_, err = fmt.Fprintln(out, dest)
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(stderr, "gwt:", err)
+			return 1
+		}
+		return 0
 	}
 	if o.command == "resolve" {
 		v, err := r.Resolve(ctx, o.branch, !o.noFetch)

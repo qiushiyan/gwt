@@ -25,9 +25,7 @@ func setup(t *testing.T) *fixture {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(f.home, "config"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("WORKTREE_COPY_GLOBS", "")
-	t.Setenv("WT_BASE_MAX_AGE_MIN", "5")
-	t.Setenv("WT_FETCH_TIMEOUT", "8")
+	t.Setenv("GWT_CONFIG", "")
 	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"} {
 		t.Setenv(key, "")
 	}
@@ -55,6 +53,16 @@ func (f *fixture) mustGit(dir string, args ...string) string {
 		f.t.Fatal(err)
 	}
 	return s
+}
+
+func (f *fixture) configure(contents string) {
+	f.t.Helper()
+	write(f.t, filepath.Join(f.r.common, "gwt.toml"), contents, 0644)
+	r, err := Open(context.Background(), f.r.dir, f.home, &f.log)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.r = r
 }
 
 func (f *fixture) create(o Options) Result {
@@ -108,6 +116,42 @@ func TestExplicitBaseAndMainIdentity(t *testing.T) {
 	}
 	if _, err := git(context.Background(), b.Path, "rev-parse", "--abbrev-ref", "@{upstream}"); err == nil {
 		t.Fatal("new branch inherited tracking")
+	}
+}
+
+func TestConfiguredBaseRootAndLinkedOverrides(t *testing.T) {
+	f := setup(t)
+	f.mustGit(f.dir, "branch", "chosen")
+	f.mustGit(f.dir, "commit", "--allow-empty", "-qm", "advance main")
+	f.configure(`base = "chosen"
+worktree_root = "~/custom trees"
+copy_globs = []
+`)
+	// A configured concrete base needs no confirmation, even interactively.
+	x, err := f.r.Create(context.Background(), Options{Branch: "configured", Confirm: func(_, _ string) bool { t.Fatal("prompted for configured base"); return false }})
+	if err != nil || x.Base != "chosen" || x.Path != filepath.Join(f.home, "custom trees", filepath.Base(f.dir), "configured") {
+		t.Fatalf("%+v %v", x, err)
+	}
+	if f.mustGit(x.Path, "rev-parse", "HEAD") != f.mustGit(f.dir, "rev-parse", "chosen") {
+		t.Fatal("wrong base")
+	}
+	r, err := Open(context.Background(), x.Path, f.home, &f.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.config.Base != "chosen" || r.root != f.r.root || r.config.Files.Repository != f.r.config.Files.Repository {
+		t.Fatalf("linked config differs: %+v", r.config)
+	}
+	y, err := r.Create(context.Background(), Options{Branch: "explicit", Base: "main"})
+	if err != nil || y.Base != "main" {
+		t.Fatalf("%+v %v", y, err)
+	}
+	if f.mustGit(y.Path, "rev-parse", "HEAD") != f.mustGit(f.dir, "rev-parse", "main") {
+		t.Fatal("explicit base did not win")
+	}
+	f.configure(`base = "missing-ref"`)
+	if _, err := f.r.Create(context.Background(), Options{Branch: "must-not-fallback", NonInteractive: true}); err == nil {
+		t.Fatal("missing configured ref fell back")
 	}
 }
 
@@ -315,11 +359,11 @@ func TestSeedIgnoredAndPreserveCheckout(t *testing.T) {
 	if z := f.create(Options{Branch: "no-copy", NoCopy: true}); z.Copied != 0 {
 		t.Fatal(z)
 	}
-	t.Setenv("WORKTREE_COPY_GLOBS", "off")
+	f.configure(`copy_globs = []`)
 	if z := f.create(Options{Branch: "off"}); z.Copied != 0 {
 		t.Fatal(z)
 	}
-	t.Setenv("WORKTREE_COPY_GLOBS", "scripts.local")
+	f.configure(`copy_globs = ["scripts.local"]`)
 	if z := f.create(Options{Branch: "custom"}); z.Copied != 1 {
 		t.Fatal(z)
 	}
@@ -331,7 +375,7 @@ func TestFetchDeadlineKillsChild(t *testing.T) {
 	bin := filepath.Join(f.home, "bin")
 	write(t, filepath.Join(bin, "git-remote-hang"), "#!/bin/sh\nsleep 30\n", 0755)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("WT_FETCH_TIMEOUT", "0.2")
+	f.configure(`fetch.timeout = "200ms"`)
 	f.mustGit(f.dir, "remote", "add", "origin", "hang::test")
 	start := time.Now()
 	if _, err := f.r.Resolve(context.Background(), "new", true); err != nil {
