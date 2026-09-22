@@ -7,7 +7,7 @@ the CLI owns the placement policy.
 
 ## Install and use
 
-Requires Go 1.25+, Git, and `cp` on macOS or Linux. TOML decoding uses BurntSushi/toml.
+Requires Go 1.25+, Git 2.38+, and `cp` on macOS or Linux. TOML decoding uses BurntSushi/toml.
 
 ```sh
 make check
@@ -111,8 +111,11 @@ then the branch. Main, current, locked, dirty, and untracked worktrees are
 protected. Ignored files, including seeded prerequisites, go with the checkout.
 
 Without `--force`, branch work must be integrated into the configured base by
-ancestry or matching squash/rebase patches. Removal resolves the base in the
-**main checkout**, so `HEAD` means its current branch regardless of the caller.
+ancestry or matching squash/rebase patches. Patch matches also require a clean
+merge that leaves the base's exact contents unchanged (Git 2.38+). Later edits
+to the same lines on the base may leave integration unconfirmed.
+Removal resolves the base in the **main checkout**, so `HEAD` means its current
+branch regardless of the caller.
 Creation still uses the caller's HEAD. These checks use local refs without fetching.
 Unconfirmed work stays in place; `--force` permits discarding it while retaining
 checkout protections. A registered worktree whose directory is already missing

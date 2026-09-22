@@ -169,7 +169,7 @@ func (r *Repo) mergedInto(ctx context.Context, branch, base string) (bool, error
 		return false, err
 	}
 	if strings.HasPrefix(out, "- ") {
-		return true, nil
+		return r.mergeLeavesBaseUnchanged(ctx, branch, base)
 	}
 	// git cherry omits merge commits. Matching their parents' patches cannot
 	// prove that edits made in the merge itself reached the base.
@@ -186,5 +186,20 @@ func (r *Repo) mergedInto(ctx context.Context, branch, base string) (bool, error
 			return false, nil
 		}
 	}
-	return true, nil
+	return r.mergeLeavesBaseUnchanged(ctx, branch, base)
+}
+
+// Patch IDs ignore whitespace, which can change code semantics. A patch match
+// needs a clean merge that leaves the base's exact contents unchanged too.
+func (r *Repo) mergeLeavesBaseUnchanged(ctx context.Context, branch, base string) (bool, error) {
+	tree, err := git(ctx, r.dir, "merge-tree", "--write-tree", base, branch)
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return false, nil // Conflicts leave integration unconfirmed.
+		}
+		return false, err
+	}
+	baseTree, err := git(ctx, r.dir, "rev-parse", base+"^{tree}")
+	return tree == baseTree, err
 }

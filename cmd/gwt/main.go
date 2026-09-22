@@ -62,8 +62,9 @@ config show reports effective values and sources; JSON durations are seconds.
 path prints the intended path without fetching or writing; omit branch for its root.
 remove deletes the registered checkout and its local branch, without prompting.
 It protects main/current worktrees and refuses dirt. Without --force, branch work
-must be integrated by ancestry or matching squash/rebase patches. The configured
-base is resolved in the MAIN checkout for removal (HEAD means that checkout's
+must be integrated by ancestry or matching squash/rebase patches. Patch matches
+also require merging to leave the base's exact contents unchanged (Git 2.38+).
+The configured base is resolved in the main checkout for removal (HEAD means its
 current branch); creation still uses the caller's HEAD. Removal does not fetch.
 Missing checkout directories can be cleaned from Git's registrations.
 Ignored files are removed with the checkout.

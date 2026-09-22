@@ -209,3 +209,19 @@ func TestRemovePreservesChangesIntroducedByMergeCommit(t *testing.T) {
 		t.Fatalf("merge-only work discarded: %+v %v", result, err)
 	}
 }
+
+func TestRemovePreservesWhitespaceChangeAfterSquash(t *testing.T) {
+	f := setup(t)
+	x := f.create(Options{Branch: "feature"})
+	write(t, filepath.Join(x.Path, "script.py"), "if True:\n    print('one')\n    print('two')\n", 0644)
+	f.mustGit(x.Path, "add", "script.py")
+	f.mustGit(x.Path, "commit", "-qm", "feature")
+	f.mustGit(f.dir, "merge", "--squash", "feature")
+	f.mustGit(f.dir, "commit", "-qm", "squash feature")
+	write(t, filepath.Join(x.Path, "script.py"), "if True:\n    print('one')\nprint('two')\n", 0644)
+	f.mustGit(x.Path, "commit", "-qam", "change indentation")
+	result, err := f.r.Remove(context.Background(), "feature", false)
+	if err == nil || result.WorktreeRemoved || result.BranchDeleted {
+		t.Fatalf("unmerged indentation discarded: %+v %v", result, err)
+	}
+}
