@@ -18,7 +18,7 @@ import (
 
 const help = `Usage: gwt [create] <branch> [base] [options]
        gwt resolve <branch> [--no-fetch] [--json]
-       gwt path [branch] [--group <dir>] [--json]
+       gwt path [branch] [--json]
        gwt remove <branch> [--force] [--json]
        gwt config show [--json]
 
@@ -35,8 +35,6 @@ Options (create unless marked otherwise; before or after arguments):
   -n, --non-interactive  Use the configured base without asking
   -y, --yes              Alias for --non-interactive
   --force               remove: allow an unmerged branch; dirty/locked trees still fail
-  --group <dir>         create/path: place at <main-checkout>/<dir>/<branch>;
-                        the branch name is unchanged
   --new                 Create even if a remote branch has the same name
   --no-copy             Skip copying ignored prerequisites from the main checkout
   --no-fetch            create/resolve: use locally cached refs
@@ -78,7 +76,7 @@ Invalid arguments print diagnostics on stderr, including with --json.
 `
 
 type options struct {
-	command, branch, base, group               string
+	command, branch, base                      string
 	yes, forceNew, noCopy, noFetch, json, help bool
 	force                                      bool
 }
@@ -90,24 +88,9 @@ func parse(args []string) (options, error) {
 		o.command, args = args[0], args[1:]
 	}
 	var positional []string
-	flags, groupSet := true, false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
+	flags := true
+	for _, arg := range args {
 		if flags {
-			if v, ok := strings.CutPrefix(arg, "--group="); ok || arg == "--group" {
-				if !ok {
-					if i+1 == len(args) {
-						return o, fmt.Errorf("--group needs a directory")
-					}
-					i++
-					v = args[i]
-				}
-				if v == "" {
-					return o, fmt.Errorf("--group needs a directory")
-				}
-				o.group, groupSet = v, true
-				continue
-			}
 			switch arg {
 			case "--":
 				flags = false
@@ -146,9 +129,6 @@ func parse(args []string) (options, error) {
 	if o.force && o.command != "remove" {
 		return o, fmt.Errorf("--force is only for remove")
 	}
-	if groupSet && o.command != "create" && o.command != "path" {
-		return o, fmt.Errorf("--group is only for create and path")
-	}
 	if o.command != "create" && (o.forceNew || o.noCopy || o.yes || (o.noFetch && o.command != "resolve")) {
 		return o, fmt.Errorf("unsupported option for %s", o.command)
 	}
@@ -163,8 +143,6 @@ func parse(args []string) (options, error) {
 		}
 		if len(positional) == 1 {
 			o.branch = positional[0]
-		} else if groupSet {
-			return o, fmt.Errorf("--group needs a branch")
 		}
 	default:
 		if len(positional) == 0 {
@@ -247,7 +225,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 		return 1
 	}
 	if o.command == "path" {
-		dest, err := r.Path(ctx, o.group, o.branch)
+		dest, err := r.Path(ctx, o.branch)
 		if err == nil {
 			if o.json {
 				err = json.NewEncoder(out).Encode(struct {
@@ -295,7 +273,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 		}
 	}
 	result, err := r.Create(ctx, worktree.Options{
-		Branch: o.branch, Base: o.base, Group: o.group, ForceNew: o.forceNew, NoCopy: o.noCopy,
+		Branch: o.branch, Base: o.base, ForceNew: o.forceNew, NoCopy: o.noCopy,
 		NoFetch: o.noFetch, NonInteractive: o.yes, Confirm: confirm,
 	})
 	if err != nil {

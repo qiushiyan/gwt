@@ -59,7 +59,6 @@ not expanded. Invalid settings and unknown keys fail before creation.
 gwt config show                 # effective values and the file owning each
 gwt config show --json          # durations are numeric seconds
 gwt path feat/search            # intended path, without fetching or creating
-gwt path search --group ux      # the same under a folder: <root>/<repo>/ux/search
 ```
 
 Environment variables select the configuration location: `GWT_CONFIG` replaces
@@ -81,13 +80,6 @@ existing workflow. `--no-fetch` selects offline operation. Git authentication
 is unattended; custom SSH commands and Git hooks remain user configuration.
 The freshness window is repository-wide, so it does not prove every remote
 was fetched recently.
-
-`--group <dir>` on `create` and `path` files the checkout under a folder,
-`<worktree_root>/<main-checkout>/<dir>/<branch>`, without putting the folder in
-the branch name; `brief start` passes a brief's domain folder this way. The
-group obeys ref-component rules, and a parent that is itself a checkout is
-refused. Removal and resume find a checkout by its branch, so the group is not
-needed afterwards.
 
 Paths derive from the main checkout even when invoked in a linked worktree.
 An absent path or empty directory is usable. Files, symlinks, nonempty slots,

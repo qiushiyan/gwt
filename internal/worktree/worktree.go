@@ -100,26 +100,14 @@ func (r *Repo) Configuration() config.Config { return r.config }
 
 // Path computes placement without fetching, creating directories, or requiring
 // a free slot. Callers use it to diagnose existing worktrees before creation.
-func (r *Repo) Path(ctx context.Context, group, branch string) (string, error) {
+func (r *Repo) Path(ctx context.Context, branch string) (string, error) {
 	if branch == "" {
 		return r.root, nil
 	}
-	return r.slot(ctx, group, branch)
-}
-
-// slot is <root>/[<group>/]<branch>. A group is a folder the caller files the
-// checkout under without renaming the branch; it obeys ref-component rules so
-// it cannot climb out of the root.
-func (r *Repo) slot(ctx context.Context, group, branch string) (string, error) {
 	if err := r.validate(ctx, branch); err != nil {
 		return "", err
 	}
-	if group != "" {
-		if _, err := git(ctx, r.dir, "check-ref-format", "refs/heads/"+group); err != nil {
-			return "", fmt.Errorf("invalid group: %q", group)
-		}
-	}
-	return filepath.Join(r.root, group, branch), nil
+	return filepath.Join(r.root, branch), nil
 }
 
 func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict, error) {
@@ -153,7 +141,7 @@ func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict,
 }
 
 type Options struct {
-	Branch, Base, Group                       string
+	Branch, Base                              string
 	ForceNew, NoCopy, NoFetch, NonInteractive bool
 	Confirm                                   func(branch, base string) bool
 }
@@ -169,10 +157,10 @@ type Result struct {
 }
 
 func (r *Repo) Create(ctx context.Context, o Options) (Result, error) {
-	dest, err := r.slot(ctx, o.Group, o.Branch)
-	if err != nil {
+	if err := r.validate(ctx, o.Branch); err != nil {
 		return Result{}, err
 	}
+	dest := filepath.Join(r.root, o.Branch)
 	if err := safeParents(r.root, filepath.Dir(dest)); err != nil {
 		return Result{}, err
 	}
@@ -180,6 +168,7 @@ func (r *Repo) Create(ctx context.Context, o Options) (Result, error) {
 		return Result{}, err
 	}
 	v := Verdict{Kind: "absent"}
+	var err error
 	if !o.ForceNew {
 		v, err = r.Resolve(ctx, o.Branch, !o.NoFetch)
 	}
@@ -263,9 +252,8 @@ func freeSlot(dest string) error {
 	return fmt.Errorf("path already exists: %s (nothing removed)", dest)
 }
 
-// A slash in a branch name or a group creates parents. Refuse symlink parents
-// so a path inside our root cannot silently place a checkout elsewhere, and
-// checkout parents so one worktree never lands inside another's files.
+// A slash in a branch name creates parents. Refuse symlink parents so a path
+// inside our root cannot silently place a checkout elsewhere.
 func safeParents(root, dir string) error {
 	for p := dir; ; p = filepath.Dir(p) {
 		info, err := os.Lstat(p)
@@ -277,9 +265,6 @@ func safeParents(root, dir string) error {
 		}
 		if p == root {
 			return nil
-		}
-		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
-			return fmt.Errorf("parent is a checkout: %s (nothing created)", p)
 		}
 		if p == filepath.Dir(p) {
 			return fmt.Errorf("path is outside root %s", root)
