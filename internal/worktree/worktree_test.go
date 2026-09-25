@@ -293,6 +293,34 @@ func TestSlotSafetyAndValidation(t *testing.T) {
 	}
 }
 
+func TestGroupPlacesUnderFolderWithoutRenamingBranch(t *testing.T) {
+	f := setup(t)
+	x := f.create(Options{Branch: "cut-turn", Group: "ux"})
+	want := filepath.Join(f.r.root, "ux", "cut-turn")
+	if x.Path != want || x.Branch != "cut-turn" || f.mustGit(x.Path, "rev-parse", "--abbrev-ref", "HEAD") != "cut-turn" {
+		t.Fatalf("%+v", x)
+	}
+	if p, err := f.r.Path(context.Background(), "ux", "cut-turn"); err != nil || p != want {
+		t.Fatalf("path %q %v", p, err)
+	}
+	for _, group := range []string{"..", "../escape", "/absolute", "a//b", ".hidden", "bad name"} {
+		if _, err := f.r.Path(context.Background(), group, "b"); err == nil {
+			t.Fatalf("accepted group %q", group)
+		}
+		if _, err := f.r.Create(context.Background(), Options{Branch: "b", Group: group, NonInteractive: true}); err == nil {
+			t.Fatalf("created under group %q", group)
+		}
+	}
+	// A group named like an existing checkout would nest one worktree in another.
+	f.create(Options{Branch: "ux-host"})
+	if _, err := f.r.Create(context.Background(), Options{Branch: "inner", Group: "ux-host", NonInteractive: true}); err == nil || !strings.Contains(err.Error(), "parent is a checkout") {
+		t.Fatalf("nested inside a checkout: %v", err)
+	}
+	if f.mustGit(f.dir, "branch", "--list", "inner") != "" {
+		t.Fatal("refused creation still made the branch")
+	}
+}
+
 func TestUnreadableSlot(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can read a mode-000 directory")

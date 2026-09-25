@@ -99,6 +99,12 @@ func TestCommandContract(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "custom")); !os.IsNotExist(err) {
 		t.Fatal("path created a directory")
 	}
+	if rc := call("path", "planned", "--group", "ux"); rc != 0 || stdout.String() != filepath.Join(home, "custom/project/ux/planned")+"\n" {
+		t.Fatalf("%d: %s %s", rc, &stdout, &stderr)
+	}
+	if rc := call("path", "--group=ux", "planned"); rc != 0 || stdout.String() != filepath.Join(home, "custom/project/ux/planned")+"\n" {
+		t.Fatalf("%d: %s %s", rc, &stdout, &stderr)
+	}
 	if rc := call("path"); rc != 0 || stdout.String() != filepath.Join(home, "custom/project")+"\n" {
 		t.Fatalf("%d %s", rc, &stdout)
 	}
@@ -158,6 +164,7 @@ func TestInvalidArguments(t *testing.T) {
 		{"resolve", "a", "--new"}, {"resolve", "a", "--no-copy"},
 		{"config"}, {"config", "show", "--no-fetch"}, {"path", "a", "b"}, {"create", "a", "--force"}, {"remove"}, {"remove", "a", "b"},
 		{"remove", "a", "b", "--json"},
+		{"a", "--group"}, {"a", "--group="}, {"path", "--group", "ux"}, {"resolve", "a", "--group", "ux"}, {"remove", "a", "--group", "ux"},
 	} {
 		var out, stderr bytes.Buffer
 		if rc := run(context.Background(), args, strings.NewReader(""), &out, &stderr); rc != 2 || out.Len() != 0 {
