@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func byBranch(t *testing.T, l Listing) map[string]Worktree {
@@ -178,5 +179,64 @@ func TestStaleTrunkIsRefreshed(t *testing.T) {
 	result, err = f.r.Remove(context.Background(), "feature", false)
 	if err != nil || !result.OK {
 		t.Fatalf("%+v %v", result, err)
+	}
+}
+
+// A branch whose commits cancel out has no patch to match; an empty net diff
+// must not read as "already applied".
+func TestNoNetChangeIsNotMerged(t *testing.T) {
+	f := setup(t)
+	x := f.create(Options{Branch: "noop"})
+	write(t, filepath.Join(x.Path, "x"), "x", 0644)
+	f.mustGit(x.Path, "add", "x")
+	f.mustGit(x.Path, "commit", "-qm", "add")
+	f.mustGit(x.Path, "rm", "-q", "x")
+	f.mustGit(x.Path, "commit", "-qm", "remove")
+	v, err := f.r.Merged(context.Background(), []string{"noop"}, false)
+	if err != nil || v.Branches[0].Merged == nil || *v.Branches[0].Merged {
+		t.Fatalf("%+v %v", v, err)
+	}
+}
+
+// The memo is really read (a poisoned entry is served), and its key includes
+// the trunk commit, so a moved trunk retires the entry instead of reusing it.
+func TestVerdictMemoKeysOnBothCommits(t *testing.T) {
+	f := setup(t)
+	x := f.create(Options{Branch: "open"})
+	f.mustGit(x.Path, "commit", "--allow-empty", "-qm", "open work")
+	tip := f.mustGit(x.Path, "rev-parse", "HEAD")
+	trunk := f.mustGit(f.dir, "rev-parse", "HEAD")
+	write(t, filepath.Join(f.r.common, "gwt-merged-v1"), tip+" "+trunk+" 1\n", 0644)
+	v, err := f.r.Merged(context.Background(), []string{"open"}, false)
+	if err != nil || !isTrue(v.Branches[0].Merged) {
+		t.Fatalf("memo not read: %+v %v", v, err)
+	}
+	f.mustGit(f.dir, "commit", "--allow-empty", "-qm", "trunk moves on")
+	v, err = f.r.Merged(context.Background(), []string{"open"}, false)
+	if err != nil || v.Branches[0].Merged == nil || *v.Branches[0].Merged {
+		t.Fatalf("stale memo reused: %+v %v", v, err)
+	}
+}
+
+// A fetch killed mid-flight truncates FETCH_HEAD with a fresh mtime; that is
+// the least trustworthy state and must read as stale.
+func TestFetchFreshness(t *testing.T) {
+	f := setup(t)
+	remoteFixture(t, f)
+	head := filepath.Join(f.r.common, "FETCH_HEAD")
+	for _, c := range []struct {
+		content string
+		age     time.Duration
+		stale   bool
+	}{{"", 0, true}, {"fetched\n", 0, false}, {"fetched\n", 2 * f.r.config.Fetch.MaxAge, true}} {
+		write(t, head, c.content, 0644)
+		when := time.Now().Add(-c.age)
+		if err := os.Chtimes(head, when, when); err != nil {
+			t.Fatal(err)
+		}
+		tr, err := f.r.Trunk(context.Background(), false)
+		if err != nil || tr.Stale != c.stale {
+			t.Fatalf("%q aged %v: %+v %v", c.content, c.age, tr, err)
+		}
 	}
 }
