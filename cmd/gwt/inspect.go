@@ -22,7 +22,7 @@ func inspect(ctx context.Context, r *worktree.Repo, o options, out, stderr io.Wr
 		value, err = r.List(ctx, o.fetch)
 	case "merged":
 		var v worktree.Verdicts
-		v, err = r.Merged(ctx, o.branches, o.fetch)
+		v, err = r.Merged(ctx, o.branches, o.fetch, o.into)
 		for _, b := range v.Branches {
 			failed = failed || b.Error != ""
 		}

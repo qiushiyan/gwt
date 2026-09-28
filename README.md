@@ -101,6 +101,7 @@ specific because a matching directory is copied whole.
 ```sh
 gwt list --json                 # every worktree: dirt and verdict against the trunk
 gwt merged feat/a feat/b        # branches with or without a checkout
+gwt merged --into <rev> <sha>   # a commit (a detached HEAD) against a chosen revision
 gwt trunk --fetch               # the trunk, refreshed when older than fetch.max_age
 ```
 
@@ -109,8 +110,10 @@ gwt trunk --fetch               # the trunk, refreshed when older than fetch.max
 else the main checkout's branch. Full ref names are tried, so a local branch
 called `origin/main` cannot shadow the remote. The trunk is not the creation
 `base`, which answers where a new branch forks from and is often the caller's
-HEAD. One trunk serves the tmux popup's tags and reap, removal, and agents,
-so they cannot disagree about a branch.
+HEAD. One verdict serves the tmux popup's tags and reap, removal, `brief`'s
+closeout, and the clean-worktrees skill's audit, so they cannot disagree about
+a branch. The audit verifies its own base against the remote's advertised
+heads and passes it as `--into`; everything else measures against the trunk.
 
 A branch is merged by ancestry, by a squash commit matching its combined patch,
 or by rebased commits matching each of its patches. Patch matches also require
@@ -141,6 +144,10 @@ remote trunk that no fetch has touched within `fetch.max_age`, bounded by
 
 `merged` is `null` for a detached checkout, a missing branch, or a failed check
 (then `error` says why). `merged` exits 1 if any named branch could not be judged.
+Its arguments are local branches first; an argument that names none but is a
+full commit id is judged as that commit. `--into <rev>` measures against that
+revision instead of the trunk, reported in the `trunk` field, and never
+fetches: the caller owns its freshness.
 
 ## Removal
 
@@ -188,6 +195,9 @@ create recovery snapshots. The tmux popup owns its richer interactive cleanup.
   Trash-and-sweep removal, snapshots, and recovery stay in dotfiles.
 - `brief start` calls `gwt path`, `gwt resolve`, and `gwt create -n --json`,
   retaining its own slot diagnosis and resume behavior.
+- The clean-worktrees skill's audit (`~/.agents/skills/clean-worktrees`) asks
+  `gwt merged --json --into <verified base> <HEAD>` per checkout; its
+  freshness, activity, and process checks stay its own.
 - The `enter-worktree` skill calls the installed binary and enters its returned
   path. The old `worktree-core.sh` CLI is a forwarding shim for running shells.
 

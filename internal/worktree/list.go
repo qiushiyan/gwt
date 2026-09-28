@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -305,29 +306,40 @@ type BranchVerdict struct {
 }
 
 type Verdicts struct {
-	Trunk    Trunk           `json:"trunk"`
+	Trunk    Trunk           `json:"trunk"` // or the explicit ref Merged was given
 	Branches []BranchVerdict `json:"branches"`
 }
 
+// A full commit id (SHA-1 or SHA-256), accepted where a branch is not found.
+var commitID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+
 // Merged judges local branches with or without a checkout, e.g. after the
 // popup has already moved a worktree away and must decide the branch's fate.
-func (r *Repo) Merged(ctx context.Context, branches []string, refresh bool) (Verdicts, error) {
-	trunk, err := r.Trunk(ctx, refresh)
-	if err != nil {
+// An argument that names no local branch but is a full commit id is judged as
+// that commit, which is how a caller holding a detached checkout's HEAD asks.
+// With into, the verdict is measured against that revision instead of the
+// trunk and nothing is fetched: the caller owns its freshness (the
+// clean-worktrees audit verifies its base against advertised remote heads).
+func (r *Repo) Merged(ctx context.Context, args []string, refresh bool, into string) (Verdicts, error) {
+	var trunk Trunk
+	var err error
+	if into != "" {
+		commit, rerr := git(ctx, r.dir, "rev-parse", "--verify", "--end-of-options", into+"^{commit}")
+		if rerr != nil {
+			return Verdicts{}, fmt.Errorf("--into %s: %w", into, rerr)
+		}
+		trunk = Trunk{Name: into, Commit: commit}
+	} else if trunk, err = r.Trunk(ctx, refresh); err != nil {
 		return Verdicts{}, err
 	}
-	out := make([]BranchVerdict, len(branches))
+	out := make([]BranchVerdict, len(args))
 	memo := r.loadVerdicts()
-	parallel(len(branches), func(i int) {
+	parallel(len(args), func(i int) {
 		b := &out[i]
-		b.Branch = branches[i]
-		if err := r.validate(ctx, b.Branch); err != nil {
+		b.Branch = args[i]
+		tip, err := r.branchOrCommit(ctx, b.Branch)
+		if err != nil {
 			b.Error = err.Error()
-			return
-		}
-		tip, err := git(ctx, r.dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+b.Branch)
-		if err != nil || tip == "" {
-			b.Error = "no local branch " + b.Branch
 			return
 		}
 		b.Commit = tip
@@ -340,6 +352,26 @@ func (r *Repo) Merged(ctx context.Context, branches []string, refresh bool) (Ver
 	})
 	memo.save()
 	return Verdicts{Trunk: trunk, Branches: out}, nil
+}
+
+// branchOrCommit resolves a local branch first, so a branch whose name happens
+// to be hex still means the branch; only a full commit id falls through.
+func (r *Repo) branchOrCommit(ctx context.Context, arg string) (string, error) {
+	if !commitID.MatchString(arg) {
+		if err := r.validate(ctx, arg); err != nil {
+			return "", err
+		}
+	}
+	if tip, err := git(ctx, r.dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+arg); err == nil && tip != "" {
+		return tip, nil
+	}
+	if commitID.MatchString(arg) {
+		if tip, err := git(ctx, r.dir, "rev-parse", "--verify", "--quiet", arg+"^{commit}"); err == nil && tip != "" {
+			return tip, nil
+		}
+		return "", fmt.Errorf("no local branch or commit %s", arg)
+	}
+	return "", fmt.Errorf("no local branch %s", arg)
 }
 
 // canonical compares paths through symlinks (macOS /tmp is /private/tmp).

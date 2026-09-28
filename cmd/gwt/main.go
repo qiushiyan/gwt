@@ -21,7 +21,7 @@ const help = `Usage: gwt [create] <branch> [base] [options]
        gwt path [branch] [--json]
        gwt remove <branch> [--force] [--json]
        gwt list [--fetch] [--json]
-       gwt merged <branch>... [--fetch] [--json]
+       gwt merged <branch|commit>... [--fetch | --into <rev>] [--json]
        gwt trunk [--fetch] [--json]
        gwt config show [--json]
 
@@ -42,6 +42,7 @@ Options (create unless marked otherwise; before or after arguments):
   --no-copy             Skip copying ignored prerequisites from the main checkout
   --no-fetch            create/resolve: use locally cached refs
   --fetch               list/merged/trunk: refresh a stale trunk first
+  --into REV            merged: judge against REV instead of the trunk (never fetches)
   --json                All commands: print one JSON object
   -h, --help            All commands: show help
 
@@ -71,7 +72,9 @@ patches; patch matches also require merging to leave the trunk's exact contents
 unchanged (Git 2.38+). Verdicts are memoized per branch and trunk commit.
 list prints every worktree with dirt and verdict (JSON: trunk, worktrees[] with
 path, branch, head, main, current, locked, prunable, dirty, merged, error).
-merged judges named local branches, with or without a checkout. trunk prints
+merged judges named local branches, with or without a checkout, or full commit
+ids (a detached checkout's HEAD); --into measures against another revision,
+e.g. a base the caller has verified itself. trunk prints
 the trunk. They never fetch unless --fetch finds the trunk older than
 fetch.max_age; a failed fetch warns and grades against cached refs.
 remove deletes the registered checkout and its local branch, without prompting.
@@ -91,6 +94,7 @@ type options struct {
 	yes, forceNew, noCopy, noFetch, json, help bool
 	force                                      bool
 	fetch                                      bool
+	into                                       string   // merged
 	branches                                   []string // merged
 }
 
@@ -105,8 +109,22 @@ func parse(args []string) (options, error) {
 	}
 	var positional []string
 	flags := true
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if flags {
+			// --into takes a value: `--into REV` or `--into=REV`.
+			if arg == "--into" || strings.HasPrefix(arg, "--into=") {
+				if value, ok := strings.CutPrefix(arg, "--into="); ok {
+					o.into = value
+				} else if i+1 < len(args) {
+					i++
+					o.into = args[i]
+				}
+				if o.into == "" {
+					return o, fmt.Errorf("--into needs a revision")
+				}
+				continue
+			}
 			switch arg {
 			case "--":
 				flags = false
@@ -150,6 +168,9 @@ func parse(args []string) (options, error) {
 	}
 	if o.fetch && o.command != "list" && o.command != "merged" && o.command != "trunk" {
 		return o, fmt.Errorf("--fetch is only for list, merged, and trunk")
+	}
+	if o.into != "" && (o.command != "merged" || o.fetch) {
+		return o, fmt.Errorf("--into is only for merged, without --fetch: the caller owns that revision's freshness")
 	}
 	if o.command != "create" && (o.forceNew || o.noCopy || o.yes || (o.noFetch && o.command != "resolve")) {
 		return o, fmt.Errorf("unsupported option for %s", o.command)

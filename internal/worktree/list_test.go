@@ -93,7 +93,7 @@ func TestMergedJudgesBranchesWithoutCheckout(t *testing.T) {
 	os.Remove(filepath.Join(f.dir, "ahead"))
 	commit := f.mustGit(f.dir, "commit-tree", ahead, "-p", head, "-m", "ahead")
 	f.mustGit(f.dir, "branch", "ahead", commit)
-	v, err := f.r.Merged(context.Background(), []string{"at-trunk", "ahead", "missing"}, false)
+	v, err := f.r.Merged(context.Background(), []string{"at-trunk", "ahead", "missing"}, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestNoNetChangeIsNotMerged(t *testing.T) {
 	f.mustGit(x.Path, "commit", "-qm", "add")
 	f.mustGit(x.Path, "rm", "-q", "x")
 	f.mustGit(x.Path, "commit", "-qm", "remove")
-	v, err := f.r.Merged(context.Background(), []string{"noop"}, false)
+	v, err := f.r.Merged(context.Background(), []string{"noop"}, false, "")
 	if err != nil || v.Branches[0].Merged == nil || *v.Branches[0].Merged {
 		t.Fatalf("%+v %v", v, err)
 	}
@@ -207,12 +207,12 @@ func TestVerdictMemoKeysOnBothCommits(t *testing.T) {
 	tip := f.mustGit(x.Path, "rev-parse", "HEAD")
 	trunk := f.mustGit(f.dir, "rev-parse", "HEAD")
 	write(t, filepath.Join(f.r.common, "gwt-merged-v1"), tip+" "+trunk+" 1\n", 0644)
-	v, err := f.r.Merged(context.Background(), []string{"open"}, false)
+	v, err := f.r.Merged(context.Background(), []string{"open"}, false, "")
 	if err != nil || !isTrue(v.Branches[0].Merged) {
 		t.Fatalf("memo not read: %+v %v", v, err)
 	}
 	f.mustGit(f.dir, "commit", "--allow-empty", "-qm", "trunk moves on")
-	v, err = f.r.Merged(context.Background(), []string{"open"}, false)
+	v, err = f.r.Merged(context.Background(), []string{"open"}, false, "")
 	if err != nil || v.Branches[0].Merged == nil || *v.Branches[0].Merged {
 		t.Fatalf("stale memo reused: %+v %v", v, err)
 	}
@@ -260,5 +260,36 @@ func TestRefreshFromLinkedCheckoutCounts(t *testing.T) {
 		if err != nil || again.Fetched || again.Stale {
 			t.Fatalf("refetched from %s: %+v %v", from.dir, again, err)
 		}
+	}
+}
+
+// A detached checkout's HEAD is judged by commit id, and --into measures it
+// against the caller's own revision instead of the trunk.
+func TestMergedCommitIntoRevision(t *testing.T) {
+	f := setup(t)
+	detached := filepath.Join(f.home, "detached")
+	f.mustGit(f.dir, "worktree", "add", "--detach", "-q", detached)
+	write(t, filepath.Join(detached, "work"), "shipped\n", 0644)
+	f.mustGit(detached, "add", "work")
+	f.mustGit(detached, "commit", "-qm", "detached work")
+	head := f.mustGit(detached, "rev-parse", "HEAD")
+	// "release" squash-lands the same change; the trunk (main) never gets it.
+	f.mustGit(f.dir, "switch", "-qc", "release")
+	write(t, filepath.Join(f.dir, "work"), "shipped\n", 0644)
+	f.mustGit(f.dir, "add", "work")
+	f.mustGit(f.dir, "commit", "-qm", "Squash detached work")
+	f.mustGit(f.dir, "switch", "-q", "main")
+	missing := strings.Repeat("0", 40)
+	into, err := f.r.Merged(context.Background(), []string{head, missing}, false, "release")
+	if err != nil || into.Trunk.Name != "release" || !isTrue(into.Branches[0].Merged) || into.Branches[1].Merged != nil ||
+		!strings.Contains(into.Branches[1].Error, "no local branch or commit") {
+		t.Fatalf("--into release: %+v %v", into, err)
+	}
+	trunk, err := f.r.Merged(context.Background(), []string{head}, false, "")
+	if err != nil || trunk.Trunk.Name != "main" || trunk.Branches[0].Merged == nil || *trunk.Branches[0].Merged {
+		t.Fatalf("against the trunk: %+v %v", trunk, err)
+	}
+	if _, err := f.r.Merged(context.Background(), []string{head}, false, "no-such-ref"); err == nil {
+		t.Fatal("an unresolvable --into revision passed")
 	}
 }

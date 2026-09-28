@@ -59,8 +59,13 @@ func TestInspectCommands(t *testing.T) {
 	if rc := call("merged", "landed", "missing"); rc != 1 || stdout.String() != "merged\tlanded\n" || !strings.Contains(stderr.String(), "missing") {
 		t.Fatalf("merged: %d %q %q", rc, &stdout, &stderr)
 	}
+	if rc := call("merged", "--into=main", "--json", "landed"); rc != 0 || !strings.Contains(stdout.String(), `"trunk":{"name":"main"`) {
+		t.Fatalf("merged --into: %d %q %q", rc, &stdout, &stderr)
+	}
 	for _, args := range [][]string{
 		{"list", "x"}, {"trunk", "x"}, {"merged"}, {"create", "a", "--fetch"}, {"remove", "a", "--fetch"}, {"path", "--fetch"},
+		{"merged", "landed", "--into"}, {"merged", "--into=", "landed"}, {"merged", "--into", "main", "--fetch", "landed"},
+		{"list", "--into", "main"}, {"remove", "landed", "--into", "main"},
 	} {
 		if rc := call(args...); rc != 2 || stdout.Len() != 0 {
 			t.Errorf("%q: %d %q %q", args, rc, &stdout, &stderr)
