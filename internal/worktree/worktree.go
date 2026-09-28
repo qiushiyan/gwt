@@ -132,7 +132,8 @@ func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict,
 	defer cancel()
 	// Refresh all configured remotes, including a newly added remote without
 	// tracking refs yet, so ambiguous names cannot silently become new branches.
-	if _, err := git(fetchCtx, r.dir, "fetch", "--all", "--quiet"); err != nil {
+	// From the main checkout, so FETCH_HEAD lands where fetchStale reads it.
+	if _, err := git(fetchCtx, r.main, "fetch", "--all", "--quiet"); err != nil {
 		fmt.Fprintf(r.stderr, "gwt: fetch failed or timed out; using cached refs: %v\n", err)
 	}
 	return r.resolve(ctx, branch)

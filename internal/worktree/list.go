@@ -58,8 +58,11 @@ func (r *Repo) resolveTrunk(ctx context.Context) (Trunk, error) {
 	return Trunk{Name: strings.TrimPrefix(full, "refs/heads/"), Commit: commit}, nil
 }
 
-// fetchStale reports whether no fetch landed within fetch.max_age. An empty
-// FETCH_HEAD with a fresh mtime is what a killed fetch leaves, so it is stale.
+// fetchStale reports whether no fetch landed within fetch.max_age. Git writes
+// FETCH_HEAD into the fetching worktree's own Git directory, so every gwt fetch
+// runs from the main checkout and this reads the shared directory's copy:
+// freshness is repository-wide. An empty FETCH_HEAD with a fresh mtime is what
+// a killed fetch leaves, so it is stale.
 func (r *Repo) fetchStale() bool {
 	info, err := os.Stat(filepath.Join(r.common, "FETCH_HEAD"))
 	return err != nil || info.Size() == 0 || time.Since(info.ModTime()) >= r.config.Fetch.MaxAge
@@ -78,7 +81,9 @@ func (r *Repo) Trunk(ctx context.Context, refresh bool) (Trunk, error) {
 		return t, nil
 	}
 	fetchCtx, cancel := context.WithTimeout(ctx, r.config.Fetch.Timeout)
-	_, err = git(fetchCtx, r.dir, "fetch", "--quiet", "--", t.Remote)
+	// From the main checkout: FETCH_HEAD is per-worktree, and fetchStale reads
+	// the main checkout's (the shared Git directory's) copy.
+	_, err = git(fetchCtx, r.main, "fetch", "--quiet", "--", t.Remote)
 	cancel()
 	if err != nil {
 		t.FetchError = err.Error()

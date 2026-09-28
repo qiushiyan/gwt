@@ -240,3 +240,25 @@ func TestFetchFreshness(t *testing.T) {
 		}
 	}
 }
+
+// Freshness is repository-wide: a refresh from a linked checkout must count
+// for the next call, from that checkout or any other, instead of fetching again.
+func TestRefreshFromLinkedCheckoutCounts(t *testing.T) {
+	f := setup(t)
+	remoteFixture(t, f)
+	x := f.create(Options{Branch: "linked", Base: "origin/develop", NoFetch: true})
+	r, err := Open(context.Background(), x.Path, f.home, &f.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := r.Trunk(context.Background(), true)
+	if err != nil || !first.Fetched {
+		t.Fatalf("first refresh: %+v %v", first, err)
+	}
+	for _, from := range []*Repo{r, f.r} {
+		again, err := from.Trunk(context.Background(), true)
+		if err != nil || again.Fetched || again.Stale {
+			t.Fatalf("refetched from %s: %+v %v", from.dir, again, err)
+		}
+	}
+}
