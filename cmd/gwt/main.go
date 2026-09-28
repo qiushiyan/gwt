@@ -20,6 +20,9 @@ const help = `Usage: gwt [create] <branch> [base] [options]
        gwt resolve <branch> [--no-fetch] [--json]
        gwt path [branch] [--json]
        gwt remove <branch> [--force] [--json]
+       gwt list [--fetch] [--json]
+       gwt merged <branch>... [--fetch] [--json]
+       gwt trunk [--fetch] [--json]
        gwt config show [--json]
 
 Create and remove Git worktrees; inspect branch resolution and configuration.
@@ -38,6 +41,7 @@ Options (create unless marked otherwise; before or after arguments):
   --new                 Create even if a remote branch has the same name
   --no-copy             Skip copying ignored prerequisites from the main checkout
   --no-fetch            create/resolve: use locally cached refs
+  --fetch               list/merged/trunk: refresh a stale trunk first
   --json                All commands: print one JSON object
   -h, --help            All commands: show help
 
@@ -60,12 +64,19 @@ Arrays replace inherited arrays; copy_globs = [] disables copying.
 Duration values use units, e.g. "5m" and "8s". Paths accept ~/ but no shell expansion.
 config show reports effective values and sources; JSON durations are seconds.
 path prints the intended path without fetching or writing; omit branch for its root.
+The trunk is where work lands: the first of origin/HEAD, origin/main,
+origin/master, main, master (else the main checkout's branch). It is not the
+creation base. Work is "merged" into it by ancestry or by matching squash/rebase
+patches; patch matches also require merging to leave the trunk's exact contents
+unchanged (Git 2.38+). Verdicts are memoized per branch and trunk commit.
+list prints every worktree with dirt and verdict (JSON: trunk, worktrees[] with
+path, branch, head, main, current, locked, prunable, dirty, merged, error).
+merged judges named local branches, with or without a checkout. trunk prints
+the trunk. They never fetch unless --fetch finds the trunk older than
+fetch.max_age; a failed fetch warns and grades against cached refs.
 remove deletes the registered checkout and its local branch, without prompting.
 It protects main/current worktrees and refuses dirt. Without --force, branch work
-must be integrated by ancestry or matching squash/rebase patches. Patch matches
-also require merging to leave the base's exact contents unchanged (Git 2.38+).
-The configured base is resolved in the main checkout for removal (HEAD means its
-current branch); creation still uses the caller's HEAD. Removal does not fetch.
+must be merged into the trunk, which removal refreshes first when stale.
 Missing checkout directories can be cleaned from Git's registrations.
 Ignored files are removed with the checkout.
 remove --json reports ok, worktree_removed, branch_deleted, and error on operational
@@ -79,13 +90,18 @@ type options struct {
 	command, branch, base                      string
 	yes, forceNew, noCopy, noFetch, json, help bool
 	force                                      bool
+	fetch                                      bool
+	branches                                   []string // merged
 }
 
 // A small parser keeps the old interspersed flag syntax without a CLI framework.
 func parse(args []string) (options, error) {
 	o := options{command: "create"}
-	if len(args) > 0 && (args[0] == "create" || args[0] == "resolve" || args[0] == "path" || args[0] == "config" || args[0] == "remove") {
-		o.command, args = args[0], args[1:]
+	if len(args) > 0 {
+		switch args[0] {
+		case "create", "resolve", "path", "config", "remove", "list", "merged", "trunk":
+			o.command, args = args[0], args[1:]
+		}
 	}
 	var positional []string
 	flags := true
@@ -116,6 +132,9 @@ func parse(args []string) (options, error) {
 			case "--json":
 				o.json = true
 				continue
+			case "--fetch":
+				o.fetch = true
+				continue
 			}
 			if strings.HasPrefix(arg, "-") {
 				return o, fmt.Errorf("unknown option: %s", arg)
@@ -128,6 +147,9 @@ func parse(args []string) (options, error) {
 	}
 	if o.force && o.command != "remove" {
 		return o, fmt.Errorf("--force is only for remove")
+	}
+	if o.fetch && o.command != "list" && o.command != "merged" && o.command != "trunk" {
+		return o, fmt.Errorf("--fetch is only for list, merged, and trunk")
 	}
 	if o.command != "create" && (o.forceNew || o.noCopy || o.yes || (o.noFetch && o.command != "resolve")) {
 		return o, fmt.Errorf("unsupported option for %s", o.command)
@@ -144,6 +166,15 @@ func parse(args []string) (options, error) {
 		if len(positional) == 1 {
 			o.branch = positional[0]
 		}
+	case "list", "trunk":
+		if len(positional) != 0 {
+			return o, fmt.Errorf("%s takes no arguments", o.command)
+		}
+	case "merged":
+		if len(positional) == 0 {
+			return o, fmt.Errorf("merged needs at least one branch")
+		}
+		o.branches = positional
 	default:
 		if len(positional) == 0 {
 			return o, fmt.Errorf("branch name required (see gwt --help)")
@@ -223,6 +254,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 	if err != nil {
 		fmt.Fprintln(stderr, "gwt:", err)
 		return 1
+	}
+	if o.command == "list" || o.command == "merged" || o.command == "trunk" {
+		return inspect(ctx, r, o, out, stderr)
 	}
 	if o.command == "path" {
 		dest, err := r.Path(ctx, o.branch)

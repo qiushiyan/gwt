@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/qiushiyan/gwt/internal/config"
 )
@@ -118,8 +117,7 @@ func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict,
 	if err != nil || v.Kind != "absent" || !fresh {
 		return v, err
 	}
-	info, err := os.Stat(filepath.Join(r.common, "FETCH_HEAD"))
-	if err == nil && info.Size() > 0 && time.Since(info.ModTime()) < r.config.Fetch.MaxAge {
+	if !r.fetchStale() {
 		return v, nil
 	}
 	remotes, err := git(ctx, r.dir, "remote")

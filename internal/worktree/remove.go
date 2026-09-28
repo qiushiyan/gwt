@@ -89,9 +89,9 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 		}
 	}
 	if !force {
-		// HEAD as a creation base is caller-relative; cleanup measures integration
-		// against the main checkout so changing the caller cannot change the verdict.
-		base, err := git(ctx, r.main, "rev-parse", "--verify", "--end-of-options", r.config.Base+"^{commit}")
+		// Integration is measured against the trunk, refreshed when stale, so a
+		// PR squash-merged on GitHub minutes ago counts without a manual fetch.
+		trunk, err := r.Trunk(ctx, true)
 		if err != nil {
 			return result, err
 		}
@@ -99,16 +99,14 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 		if err != nil {
 			return result, err
 		}
-		merged, err := r.mergedInto(ctx, tip, base)
+		memo := r.loadVerdicts()
+		merged, err := r.merged(ctx, memo, tip, trunk.Commit)
+		memo.save()
 		if err != nil {
 			return result, err
 		}
 		if !merged {
-			name, err := git(ctx, r.main, "rev-parse", "--abbrev-ref", r.config.Base)
-			if err != nil {
-				return result, err
-			}
-			return result, fmt.Errorf("branch %q has work not confirmed in %s (%s); inspect git log --oneline %s..%s and the branch diff before using --force to discard it", branch, name, base[:12], base, tip)
+			return result, fmt.Errorf("branch %q has work not confirmed in %s (%s); inspect git log --oneline %s..%s and the branch diff before using --force to discard it", branch, trunk.Name, trunk.Commit[:12], trunk.Commit, tip)
 		}
 	}
 	// Git rechecks dirt, locking, and registration immediately before removal.

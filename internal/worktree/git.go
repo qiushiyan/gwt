@@ -32,10 +32,20 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("git %s: %w", args[0], ctx.Err())
+		// Name the subcommand, not a leading global option.
+		name := args[0]
+		for i := 0; i < len(args); i++ {
+			if args[i] == "-c" || args[i] == "-C" {
+				i++
+			} else if !strings.HasPrefix(args[i], "-") {
+				name = args[i]
+				break
+			}
 		}
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("git %s: %w", name, ctx.Err())
+		}
+		return "", fmt.Errorf("git %s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSuffix(stdout.String(), "\n"), nil
 }

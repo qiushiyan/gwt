@@ -96,6 +96,52 @@ warning after successful creation: the path is still returned, and JSON includes
 `--no-copy` to disable seeding for one invocation. Keep configured globs
 specific because a matching directory is copied whole.
 
+## Listing and merge verdicts
+
+```sh
+gwt list --json                 # every worktree: dirt and verdict against the trunk
+gwt merged feat/a feat/b        # branches with or without a checkout
+gwt trunk --fetch               # the trunk, refreshed when older than fetch.max_age
+```
+
+"Merged" always means merged into the **trunk**, where work lands: the first of
+`origin/HEAD`, `origin/main`, `origin/master`, `main`, `master` that exists,
+else the main checkout's branch. Full ref names are tried, so a local branch
+called `origin/main` cannot shadow the remote. The trunk is not the creation
+`base`, which answers where a new branch forks from and is often the caller's
+HEAD. One trunk serves the tmux popup's tags and reap, removal, and agents,
+so they cannot disagree about a branch.
+
+A branch is merged by ancestry, by a squash commit matching its combined patch,
+or by rebased commits matching each of its patches. Patch matches also require
+a clean merge that leaves the trunk's exact contents unchanged (Git 2.38+),
+because patch IDs ignore whitespace that can change code. Merge commits on the
+branch defeat the per-commit match: `git cherry` cannot see edits made inside a
+merge. Later edits to the same lines on the trunk may leave integration
+unconfirmed. A branch with no commits of its own counts as merged; it holds
+nothing to lose.
+
+A verdict is a pure function of the branch and trunk commits, so it is memoized
+in `gwt-merged-v1` in the shared Git directory. Only the first call after either
+moves pays the patch-ID scans. Status and verdicts run concurrently, one Git
+process per CPU at most. Status probes pass `--no-optional-locks` so they never
+contend with an agent working in the same checkout.
+
+`list`, `merged`, and `trunk` read cached refs. `--fetch` first refreshes a
+remote trunk that no fetch has touched within `fetch.max_age`, bounded by
+`fetch.timeout`; a failed fetch warns, grades against cached refs, and sets
+`trunk.fetch_error`. JSON shapes:
+
+```json
+{"trunk":{"name":"origin/develop","commit":"…","remote":"origin","stale":false},
+ "worktrees":[{"path":"…","branch":"feat/x","head":"…","main":false,"current":false,
+   "locked":false,"prunable":false,"dirty":true,"merged":false}]}
+{"trunk":{…},"branches":[{"branch":"feat/x","commit":"…","merged":true}]}
+```
+
+`merged` is `null` for a detached checkout, a missing branch, or a failed check
+(then `error` says why). `merged` exits 1 if any named branch could not be judged.
+
 ## Removal
 
 Run from another checkout of the same repository:
@@ -110,13 +156,11 @@ branch, even after the configured root changes. It deletes the checkout and
 then the branch. Main, current, locked, dirty, and untracked worktrees are
 protected. Ignored files, including seeded prerequisites, go with the checkout.
 
-Without `--force`, branch work must be integrated into the configured base by
-ancestry or matching squash/rebase patches. Patch matches also require a clean
-merge that leaves the base's exact contents unchanged (Git 2.38+). Later edits
-to the same lines on the base may leave integration unconfirmed.
-Removal resolves the base in the **main checkout**, so `HEAD` means its current
-branch regardless of the caller.
-Creation still uses the caller's HEAD. These checks use local refs without fetching.
+Without `--force`, the branch must be merged into the trunk, by the verdict
+above. Removal refreshes a stale remote trunk first, so a PR squash-merged on
+GitHub minutes ago counts without a manual fetch; if the fetch fails it warns
+and judges against cached refs. The verdict does not depend on which checkout
+calls removal.
 Unconfirmed work stays in place; `--force` permits discarding it while retaining
 checkout protections. A registered worktree whose directory is already missing
 can still be removed along with its branch.
@@ -139,7 +183,9 @@ create recovery snapshots. The tmux popup owns its richer interactive cleanup.
   the shell helper.
 - The tmux popup calls `gwt create -n` using the shared configuration.
   It then opens the window and delivers dependency installation and the agent
-  command. Listing, merge checks, removal, and recovery stay in dotfiles.
+  command. Its rows and reap come from `gwt list --json`, its branch cleanup
+  from `gwt merged`, and its background refresh from `gwt trunk --fetch`.
+  Trash-and-sweep removal, snapshots, and recovery stay in dotfiles.
 - `brief start` calls `gwt path`, `gwt resolve`, and `gwt create -n --json`,
   retaining its own slot diagnosis and resume behavior.
 - The `enter-worktree` skill calls the installed binary and enters its returned
@@ -159,7 +205,7 @@ uses a TOML decoder alongside the standard library and invokes Git directly,
 avoiding a second Git implementation or a CLI framework.
 
 `cmd/gwt` owns arguments, confirmation, and output. `internal/worktree` owns
-resolution, creation, seeding, and removal; `internal/config` owns layered
+resolution, creation, seeding, listing, merge verdicts, and removal; `internal/config` owns layered
 configuration and validation. `make check` runs race-enabled tests, vet,
 and formatting checks. Tests use temporary homes and real repositories/local
 remotes; a hanging remote helper exercises the fetch deadline. Installation

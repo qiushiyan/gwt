@@ -155,7 +155,8 @@ func TestRemoveRecognizesMergeStyles(t *testing.T) {
 	}
 }
 
-func TestRemoveUsesMainCheckoutBase(t *testing.T) {
+// The verdict is measured against the trunk, whichever checkout calls remove.
+func TestRemoveVerdictIgnoresCaller(t *testing.T) {
 	f := setup(t)
 	caller := f.create(Options{Branch: "older-topic"})
 	target := f.create(Options{Branch: "merged"})
