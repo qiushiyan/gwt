@@ -28,6 +28,8 @@ const help = `Usage: gwt [create] <branch> [base] [options]
 Create and remove Git worktrees; inspect branch resolution and configuration.
 Creation places branches in <worktree_root>/<main-checkout>/<branch> and prints
 the absolute path, or one JSON object with --json. Diagnostics go to stderr.
+When stderr is a terminal, creation also copies the path to the clipboard
+(toclip, else pbcopy); callers that capture stderr leave the clipboard alone.
 The binary never changes your shell's directory or installs dependencies; the
 zsh gwt function from dotfiles wraps it and performs the cd for --cd.
 
@@ -41,6 +43,7 @@ Options (create unless marked otherwise; before or after arguments):
   --force               remove: allow an unmerged branch; dirty/locked trees still fail
   --new                 Create even if a remote branch has the same name
   --no-copy             Skip copying ignored prerequisites from the main checkout
+  --no-clipboard        Skip copying the new path to the clipboard
   --no-fetch            create/resolve: use locally cached refs
   --fetch               list/merged/trunk: refresh a stale trunk first
   --into REV            merged: judge against REV instead of the trunk (never fetches)
@@ -94,7 +97,7 @@ Invalid arguments print diagnostics on stderr, including with --json.
 type options struct {
 	command, branch, base                      string
 	yes, forceNew, noCopy, noFetch, json, help bool
-	force, cd                                  bool
+	force, cd, noClipboard                     bool
 	fetch                                      bool
 	into                                       string   // merged
 	branches                                   []string // merged
@@ -146,6 +149,9 @@ func parse(args []string) (options, error) {
 			case "--no-copy":
 				o.noCopy = true
 				continue
+			case "--no-clipboard":
+				o.noClipboard = true
+				continue
 			case "--no-fetch":
 				o.noFetch = true
 				continue
@@ -177,7 +183,7 @@ func parse(args []string) (options, error) {
 	if o.into != "" && (o.command != "merged" || o.fetch) {
 		return o, fmt.Errorf("--into is only for merged, without --fetch: the caller owns that revision's freshness")
 	}
-	if o.command != "create" && (o.forceNew || o.noCopy || o.yes || o.cd || (o.noFetch && o.command != "resolve")) {
+	if o.command != "create" && (o.forceNew || o.noCopy || o.noClipboard || o.yes || o.cd || (o.noFetch && o.command != "resolve")) {
 		return o, fmt.Errorf("unsupported option for %s", o.command)
 	}
 	// Only the parent shell can change its own directory. The zsh gwt function
@@ -353,6 +359,12 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 	if err != nil {
 		fmt.Fprintln(stderr, "gwt:", err)
 		return 1
+	}
+	// The worktree exists and its path is printed, so a failed copy only warns.
+	if !o.noClipboard && attended(stderr) {
+		if err := copyPath(ctx, result.Path); err != nil {
+			fmt.Fprintln(stderr, "gwt: path not copied to the clipboard:", err)
+		}
 	}
 	return 0
 }

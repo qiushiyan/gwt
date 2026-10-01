@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -158,6 +160,7 @@ func TestInvalidArguments(t *testing.T) {
 		{"resolve", "a", "--new"}, {"resolve", "a", "--no-copy"},
 		{"config"}, {"config", "show", "--no-fetch"}, {"path", "a", "b"}, {"create", "a", "--force"}, {"remove"}, {"remove", "a", "b"},
 		{"remove", "a", "b", "--json"}, {"--cd", "a"}, {"create", "a", "--cd"}, {"remove", "a", "--cd"}, {"path", "--cd"},
+		{"path", "a", "--no-clipboard"}, {"remove", "a", "--no-clipboard"},
 	} {
 		var out, stderr bytes.Buffer
 		if rc := run(context.Background(), args, strings.NewReader(""), &out, &stderr); rc != 2 || out.Len() != 0 {
@@ -186,5 +189,105 @@ func TestCDWithoutShellFunction(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "dev", ".worktrees", "project", "feat/cd")); !os.IsNotExist(err) {
 		t.Fatal("worktree created despite refused --cd")
+	}
+}
+
+// Creation copies its path only for a person at a terminal, and a failed copy
+// still succeeds with the path on stdout.
+func TestClipboard(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GWT_CONFIG", "")
+	bin, clip := filepath.Join(home, "bin"), filepath.Join(home, "clipboard")
+	if err := os.Mkdir(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	toclip := func(script string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(bin, "toclip"), []byte("#!/bin/sh\n"+script), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	toclip(`[ "$1" = -q ] && cat > "$HOME/clipboard"` + "\n")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	repo := filepath.Join(home, "project")
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main", repo},
+		{"-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "initial"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git: %s: %v", out, err)
+		}
+	}
+	t.Chdir(repo)
+	var stdout, stderr bytes.Buffer
+	create := func(branch string, flags ...string) string {
+		t.Helper()
+		stdout.Reset()
+		stderr.Reset()
+		os.Remove(clip)
+		if rc := run(context.Background(), append([]string{"create", "-n", branch}, flags...), strings.NewReader(""), &stdout, &stderr); rc != 0 {
+			t.Fatalf("%s: %d %s", branch, rc, &stderr)
+		}
+		want := filepath.Join(home, "dev", ".worktrees", "project", branch)
+		var result struct{ Path string }
+		if slices.Contains(flags, "--json") {
+			json.Unmarshal(stdout.Bytes(), &result)
+		} else if stdout.String() == want+"\n" {
+			result.Path = want
+		}
+		if result.Path != want {
+			t.Fatalf("%s stdout: %q", branch, &stdout)
+		}
+		return want
+	}
+	copied := func() string {
+		got, err := os.ReadFile(clip)
+		if os.IsNotExist(err) {
+			return "<untouched>"
+		}
+		return string(got)
+	}
+
+	// Captured stderr, a pipe, and /dev/null are not a person watching.
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devNull.Close()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	for _, stream := range []io.Writer{&stderr, devNull, w} {
+		if attended(stream) {
+			t.Fatalf("attended(%T)", stream)
+		}
+	}
+	create("captured")
+	if got := copied(); got != "<untouched>" {
+		t.Fatalf("captured stderr copied %q", got)
+	}
+
+	defer func(before func(io.Writer) bool) { attended = before }(attended)
+	attended = func(io.Writer) bool { return true }
+	if path := create("watched", "--json"); copied() != path {
+		t.Fatalf("clipboard %q, want %q", copied(), path)
+	}
+	if path := create("watched-plain"); copied() != path || strings.Contains(stderr.String(), "clipboard") {
+		t.Fatalf("clipboard %q, want %q; stderr %s", copied(), path, &stderr)
+	}
+	if create("opted-out", "--no-clipboard"); copied() != "<untouched>" {
+		t.Fatalf("--no-clipboard copied %q", copied())
+	}
+	toclip("echo 'no terminal to send to' >&2\nexit 1\n")
+	create("copy-fails")
+	if !strings.Contains(stderr.String(), "path not copied to the clipboard: toclip: exit status 1: no terminal to send to") {
+		t.Fatalf("stderr: %s", &stderr)
 	}
 }

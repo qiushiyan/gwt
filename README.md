@@ -7,7 +7,7 @@ the CLI owns the placement policy.
 
 ## Install and use
 
-Requires Go 1.25+, Git 2.38+, and `cp` on macOS or Linux. TOML decoding uses BurntSushi/toml.
+Requires Go 1.25+, Git 2.38+, and `cp` on macOS or Linux.
 
 ```sh
 make check
@@ -15,6 +15,7 @@ make install                    # installs to ~/.local/bin; keep that directory 
 gwt fix/login main              # explicit base, no confirmation
 gwt feat/search                 # confirm forking from current HEAD
 gwt --cd feat/search            # same, then cd into it (zsh function, default off)
+gwt feat/search --no-clipboard  # leave the clipboard alone
 gwt create -n feat/agent-work    # unattended; stdout is only the path
 gwt create -n feat/agent-json --json
 gwt --help
@@ -27,6 +28,12 @@ forwarded untouched. `gwtcd` is an alias for `gwt --cd`. Without the function,
 the binary refuses `--cd` before creating anything and says so. Agents use the
 returned path as their working directory. Run `zshreload` once so an existing
 shell picks up the function.
+
+When stderr is a terminal, creation also copies the path to the clipboard
+through the dotfiles `toclip`, which reaches the laptop's clipboard from an SSH
+session, or else `pbcopy`. A caller that captures stderr, as agents do, leaves
+the clipboard alone; `--no-clipboard` skips the copy at a terminal. A failed
+copy only warns: the worktree and its printed path stand.
 
 Command names are reserved in the first position. To create a branch named
 `remove`, for example, use `gwt create remove`.
@@ -193,13 +200,15 @@ create recovery snapshots. The tmux popup owns its richer interactive cleanup.
 - The dotfiles zsh `gwt` function and its completion wrap the binary; the
   function adds only the parent-shell `cd` for `--cd`. No creation logic lives
   in the shell.
-- The tmux popup calls `gwt create -n` using the shared configuration.
-  It then opens the window and delivers dependency installation and the agent
-  command. Its rows and reap come from `gwt list --json`, its branch cleanup
-  from `gwt merged`, and its background refresh from `gwt trunk --fetch`.
+- The tmux popup calls `gwt create -n` using the shared configuration, at
+  its terminal, so the new path lands on the clipboard. It then opens the
+  window and delivers dependency installation and the agent command. Its rows
+  and reap come from `gwt list --json`, its branch cleanup from `gwt merged`,
+  and its background refresh from `gwt trunk --fetch`.
   Trash-and-sweep removal, snapshots, and recovery stay in dotfiles.
 - `brief start` calls `gwt path`, `gwt resolve`, and `gwt create -n --json`,
-  retaining its own slot diagnosis and resume behavior.
+  retaining its own slot diagnosis and resume behavior. Its clipboard pointer,
+  copied after creation, replaces any path gwt copied.
 - The clean-worktrees skill's audit (`~/.agents/skills/clean-worktrees`) asks
   `gwt merged --json --into <verified base> <HEAD>` per checkout; its
   freshness, activity, and process checks stay its own.
@@ -216,13 +225,14 @@ pass `--no-fetch` for a read-only probe.
 Go fits the existing personal CLI toolchain and provides the subprocess, timeout,
 filesystem, and testing support this tool needs. Rust's ownership model would
 add little to a short-lived CLI whose work is mostly performed by Git. The code
-uses a TOML decoder alongside the standard library and invokes Git directly,
-avoiding a second Git implementation or a CLI framework.
+uses a TOML decoder and x/term's terminal check alongside the standard
+library and invokes Git directly, avoiding a second Git implementation or a CLI
+framework.
 
-`cmd/gwt` owns arguments, confirmation, and output. `internal/worktree` owns
-resolution, creation, seeding, listing, merge verdicts, and removal; `internal/config` owns layered
-configuration and validation. `make check` runs race-enabled tests, vet,
-and formatting checks. Tests use temporary homes and real repositories/local
-remotes; a hanging remote helper exercises the fetch deadline. Installation
-builds beside the destination and renames it into place so concurrent callers
-see a complete executable.
+`cmd/gwt` owns arguments, confirmation, output, and the clipboard copy.
+`internal/worktree` owns resolution, creation, seeding, listing, merge verdicts,
+and removal; `internal/config` owns layered configuration and validation.
+`make check` runs race-enabled tests, vet, and formatting checks. Tests use
+temporary homes and real repositories/local remotes; a hanging remote helper
+exercises the fetch deadline. Installation builds beside the destination and
+renames it into place so concurrent callers see a complete executable.
