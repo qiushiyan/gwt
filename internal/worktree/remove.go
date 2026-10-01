@@ -31,10 +31,10 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 	if err != nil {
 		return result, err
 	}
-	for _, record := range strings.Split(list, "\x00\x00") {
+	for record := range strings.SplitSeq(list, "\x00\x00") {
 		var path, ref string
 		locked := false
-		for _, field := range strings.Split(record, "\x00") {
+		for field := range strings.SplitSeq(record, "\x00") {
 			switch {
 			case strings.HasPrefix(field, "worktree "):
 				path = strings.TrimPrefix(field, "worktree ")
@@ -138,11 +138,8 @@ func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, 
 func (r *Repo) mergedInto(ctx context.Context, branch, base string) (bool, error) {
 	if _, err := git(ctx, r.dir, "merge-base", "--is-ancestor", branch, base); err == nil {
 		return true, nil
-	} else {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-			return false, err
-		}
+	} else if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
+		return false, err
 	}
 	ancestor, err := git(ctx, r.dir, "merge-base", base, branch)
 	if err != nil {
@@ -179,7 +176,7 @@ func (r *Repo) mergedInto(ctx context.Context, branch, base string) (bool, error
 	if err != nil || out == "" {
 		return false, err
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if !strings.HasPrefix(line, "- ") {
 			return false, nil
 		}
@@ -192,8 +189,7 @@ func (r *Repo) mergedInto(ctx context.Context, branch, base string) (bool, error
 func (r *Repo) mergeLeavesBaseUnchanged(ctx context.Context, branch, base string) (bool, error) {
 	tree, err := git(ctx, r.dir, "merge-tree", "--write-tree", base, branch)
 	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.ExitCode() == 1 {
 			return false, nil // Conflicts leave integration unconfirmed.
 		}
 		return false, err

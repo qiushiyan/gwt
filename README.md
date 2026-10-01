@@ -7,7 +7,7 @@ the CLI owns the placement policy.
 
 ## Install and use
 
-Requires Go 1.25+, Git 2.38+, and `cp` on macOS or Linux.
+Requires Go 1.27+, Git 2.38+, and `cp` on macOS or Linux.
 
 ```sh
 make check

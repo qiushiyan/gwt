@@ -20,7 +20,7 @@ func (r *Repo) seed(ctx context.Context, dest string) (int, []string) {
 	}
 	copied := 0
 	var warnings []string
-	for _, rel := range strings.Split(files, "\x00") {
+	for rel := range strings.SplitSeq(files, "\x00") {
 		rel = strings.TrimSuffix(rel, "/")
 		if rel == "" {
 			continue

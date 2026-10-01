@@ -73,7 +73,7 @@ func (r *Repo) resolve(ctx context.Context, branch string) (Verdict, error) {
 		return Verdict{}, err
 	}
 	v := Verdict{Kind: "absent"}
-	for _, ref := range strings.Split(refs, "\n") {
+	for ref := range strings.SplitSeq(refs, "\n") {
 		if ref == "refs/heads/"+branch {
 			return Verdict{Kind: "local"}, nil
 		}

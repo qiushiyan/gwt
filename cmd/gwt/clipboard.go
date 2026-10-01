@@ -46,8 +46,7 @@ func copyPath(ctx context.Context, path string) error {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("%s timed out after %s", name, timeout)
 		}
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok && len(exit.Stderr) > 0 {
 			return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(exit.Stderr)))
 		}
 		return fmt.Errorf("%s: %w", name, err)

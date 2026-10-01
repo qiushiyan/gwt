@@ -194,13 +194,11 @@ func parallel(n int, fn func(i int)) {
 	next := make(chan int)
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range next {
 				fn(i)
 			}
-		}()
+		})
 	}
 	for i := range n {
 		next <- i
@@ -247,7 +245,7 @@ func (r *Repo) List(ctx context.Context, refresh bool) (Listing, error) {
 	var list []Worktree
 	for i, record := range strings.Split(strings.TrimRight(out, "\x00"), "\x00\x00") {
 		var w Worktree
-		for _, field := range strings.Split(record, "\x00") {
+		for field := range strings.SplitSeq(record, "\x00") {
 			switch {
 			case strings.HasPrefix(field, "worktree "):
 				w.Path = strings.TrimPrefix(field, "worktree ")
