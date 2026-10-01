@@ -54,6 +54,9 @@ copy_globs = [".env*", ".npmrc", "scripts.local", ".duet", "docs.local"]
 [fetch]
 max_age = "5m"
 timeout = "8s"
+
+[recovery]
+keep = "30d"                    # removal's recovery refs; "0" keeps them
 ```
 
 These are also the built-in defaults when no file exists. During creation,
@@ -149,12 +152,14 @@ remote trunk that no fetch has touched within `fetch.max_age`, bounded by
 ```json
 {"trunk":{"name":"origin/develop","commit":"…","remote":"origin","stale":false},
  "worktrees":[{"path":"…","branch":"feat/x","head":"…","main":false,"current":false,
-   "locked":false,"prunable":false,"dirty":true,"merged":false}]}
+   "locked":false,"prunable":false,"dirty":true,"merged":false,"removable":false}]}
 {"trunk":{…},"branches":[{"branch":"feat/x","commit":"…","merged":true}]}
 ```
 
-`merged` is `null` for a detached checkout, a missing branch, or a failed check
-(then `error` says why). `merged` exits 1 if any named branch could not be judged.
+`merged` is `null` for a detached checkout, a missing branch, an unreadable
+status, or a failed check (then `error` says why). An unreadable status also
+reads as `dirty`, so unknown state is never clean. `removable` says whether
+`gwt remove <path>` without flags would take the worktree (§ Removal). `merged` exits 1 if any named branch could not be judged.
 Its arguments are local branches first; an argument that names none but is a
 full commit id is judged as that commit. `--into <rev>` measures against that
 revision instead of the trunk, reported in the `trunk` field, and never
@@ -162,38 +167,67 @@ fetches: the caller owns its freshness.
 
 ## Removal
 
-Run from another checkout of the same repository:
+gwt is the one removal engine: the tmux popup, `brief`'s closeout and the
+clean-worktrees skill all call it. Run from another checkout of the same
+repository:
 
 ```sh
-gwt remove feat/search --json
-gwt remove feat/abandoned --force --json
+gwt remove feat/search --json                 # checkout and merged branch
+gwt remove feat/abandoned --force --json      # unmerged branch; tip kept
+gwt remove /path/to/checkout --keep-branch    # checkout only; detached too
+gwt remove feat/a feat/b --discard-dirty      # one batch; dirt snapshotted
+gwt remove feat/pr --force --expect-head <sha> --json
 ```
 
-Removal is non-interactive and finds the registered worktree by its local
-branch, even after the configured root changes. It deletes the checkout and
-then the branch. Main, current, locked, dirty, and untracked worktrees are
-protected. Ignored files, including seeded prerequisites, go with the checkout.
+A target is a branch or a checkout path (absolute or `./`-relative). A branch
+finds its registered checkout, even after the configured root changes, or is
+deleted alone when it has none. Several targets form one batch.
 
-Without `--force`, the branch must be merged into the trunk, by the verdict
-above. Removal refreshes a stale remote trunk first, so a PR squash-merged on
-GitHub minutes ago counts without a manual fetch; if the fetch fails it warns
-and judges against cached refs. The verdict does not depend on which checkout
-calls removal.
-Unconfirmed work stays in place; `--force` permits discarding it while retaining
-checkout protections. A registered worktree whose directory is already missing
-can still be removed along with its branch.
+**Refusals** are one rule, `refusal` in `internal/worktree/remove.go`, which
+`list`'s `removable` also applies: main, current, locked, a checkout holding
+another worktree, and dirt. Dirt is uncommitted or untracked files, edits
+hidden by assume-unchanged or skip-worktree flags, or a status that cannot be
+read. Without `--force`, a branch that removal deletes must be merged into the
+trunk by the verdict above; removal refreshes a stale remote trunk first, so a
+PR squash-merged on GitHub minutes ago counts. `--keep-branch` removes only the
+checkout. `--expect-head` refuses unless the single target is still at that
+commit, which closes the race between deciding and removing (brief's closeout
+passes the merged PR's head).
 
-Success exits 0; operational failure exits 1. JSON reports both steps so an
-agent can distinguish refusal from partial completion:
+**Recovery.** Nothing irreversible happens without a ref under
+`refs/wt-trash/<epoch>.<pid>/<slot>-<name>`, outside `refs/heads` so no branch
+list shows it:
+
+- `--discard-dirty` snapshots the checkout's whole working state, untracked
+  files included and ignored ones not, as a commit parented on HEAD. A scratch
+  `GIT_INDEX_FILE` leaves the checkout's index and the stash alone. A checkout
+  that cannot be snapshotted stays.
+- `--force` keeps the deleted branch's tip.
+- A removed detached checkout keeps its HEAD.
+
+`git branch <name> <ref>` restores any of them. Refs older than
+`recovery.keep` (default `30d`, `0` keeps them) expire on each removal.
+
+**Trash.** A checkout is renamed into `<worktree_root>/.trash/<batch>/`, which is
+instant on one filesystem however large its dependency trees, then
+unregistered. Its now-empty parent directories under the repository's root are
+removed without scanning siblings. A process in its own session deletes the
+batch, plus any batch older than two minutes a killed run left, so the caller
+returns at once and a closing tmux popup's hangup cannot stop the deletion.
+Ignored files, including seeded prerequisites, go with the checkout; the
+clean-worktrees skill archives them first when they matter.
+
+Exit 0 when every target succeeds, else 1. `--json` prints one object per
+target, so an agent can tell refusal from partial completion:
 
 ```json
-{"ok":true,"path":"/absolute/checkout","branch":"feat/search","worktree_removed":true,"branch_deleted":true}
+{"ok":true,"target":"feat/x","path":"/abs/checkout","branch":"feat/x","worktree_removed":true,"branch_deleted":true,"recovery_ref":"refs/wt-trash/1790000000.4242/001-feat-x"}
 ```
 
-Failures include `error`. If branch deletion fails after checkout removal,
-`worktree_removed` is true and `branch_deleted` is false; the branch remains
-available for manual cleanup. The command does not manage tmux windows or
-create recovery snapshots. The tmux popup owns its richer interactive cleanup.
+Failures carry `error`. If branch deletion fails after the checkout went,
+`worktree_removed` is true and `branch_deleted` false; the branch remains for
+manual cleanup. gwt does not touch tmux windows or processes working in a
+checkout; its callers do.
 
 ## Integration boundaries
 
@@ -203,17 +237,20 @@ create recovery snapshots. The tmux popup owns its richer interactive cleanup.
 - The tmux popup calls `gwt create -n` using the shared configuration, at
   its terminal, so the new path lands on the clipboard. It then opens the
   window and delivers dependency installation and the agent command. Its rows
-  and reap come from `gwt list --json`, its branch cleanup from `gwt merged`,
-  and its background refresh from `gwt trunk --fetch`.
-  Trash-and-sweep removal, snapshots, and recovery stay in dotfiles.
+  and reap come from `gwt list --json` (`removable`, `merged`), its branch
+  prompts from `gwt merged`, its background refresh from `gwt trunk --fetch`,
+  and every removal from `gwt remove`. Prompts and tmux windows stay there.
 - `brief start` calls `gwt path`, `gwt resolve`, and `gwt create -n --json`,
   retaining its own slot diagnosis and resume behavior. Its clipboard pointer,
   copied after creation, replaces any path gwt copied.
 - The clean-worktrees skill's audit (`~/.agents/skills/clean-worktrees`) asks
   `gwt merged --json --into <verified base> <HEAD>` per checkout; its
-  freshness, activity, and process checks stay its own.
+  freshness, activity, and process checks stay its own. Its runner archives
+  ignored files, then calls `gwt remove --keep-branch --expect-head`.
+- `brief closeout` emits `gwt remove` commands for a merged branch, with
+  `--force --expect-head <PR head>` for a squash merge.
 - The `enter-worktree` skill calls the installed binary and enters its returned
-  path. The old `worktree-core.sh` CLI is a forwarding shim for running shells.
+  path.
 
 Creation stdout is one path or one JSON object; resolution prints one verdict
 or JSON object. Diagnostics and prompts use stderr. Exit codes are 0 for success, 1 for operational failure or declined

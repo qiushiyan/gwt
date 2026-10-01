@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,11 +27,23 @@ func (f Fetch) MarshalJSON() ([]byte, error) {
 	}{f.MaxAge.Seconds(), f.Timeout.Seconds()})
 }
 
+// Recovery bounds how long removal's recovery refs outlive it; 0 keeps them.
+type Recovery struct {
+	Keep time.Duration
+}
+
+func (r Recovery) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Keep float64 `json:"keep"`
+	}{r.Keep.Seconds()})
+}
+
 type Config struct {
 	Base         string            `json:"base"`
 	WorktreeRoot string            `json:"worktree_root"`
 	CopyGlobs    []string          `json:"copy_globs"`
 	Fetch        Fetch             `json:"fetch"`
+	Recovery     Recovery          `json:"recovery"`
 	Sources      map[string]string `json:"sources"`
 	Files        Files             `json:"files"`
 }
@@ -46,9 +59,10 @@ func defaults(home string) Config {
 		WorktreeRoot: filepath.Join(home, "dev", ".worktrees"),
 		CopyGlobs:    []string{".env*", ".npmrc", "scripts.local", ".duet", "docs.local"},
 		Fetch:        Fetch{MaxAge: 5 * time.Minute, Timeout: 8 * time.Second},
+		Recovery:     Recovery{Keep: 30 * 24 * time.Hour},
 		Sources: map[string]string{
 			"base": "builtin", "worktree_root": "builtin", "copy_globs": "builtin",
-			"fetch.max_age": "builtin", "fetch.timeout": "builtin",
+			"fetch.max_age": "builtin", "fetch.timeout": "builtin", "recovery.keep": "builtin",
 		},
 	}
 }
@@ -97,6 +111,9 @@ type fileConfig struct {
 		MaxAge  *string `toml:"max_age"`
 		Timeout *string `toml:"timeout"`
 	} `toml:"fetch"`
+	Recovery struct {
+		Keep *string `toml:"keep"`
+	} `toml:"recovery"`
 }
 
 func (c *Config) read(path, home string, optional bool) error {
@@ -158,7 +175,29 @@ func (c *Config) read(path, home string, optional bool) error {
 		}
 		*d.dst, c.Sources[d.key] = value, path
 	}
+	if f.Recovery.Keep != nil {
+		value, err := parseKeep(*f.Recovery.Keep)
+		if err != nil {
+			return invalid("recovery.keep", err)
+		}
+		c.Recovery.Keep, c.Sources["recovery.keep"] = value, path
+	}
 	return nil
+}
+
+// parseKeep accepts Go durations plus whole days ("30d"), the natural unit for
+// retention; "0" keeps recovery refs forever.
+func parseKeep(s string) (time.Duration, error) {
+	value, err := time.ParseDuration(s)
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		var n int64
+		n, err = strconv.ParseInt(days, 10, 32)
+		value = time.Duration(n) * 24 * time.Hour
+	}
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf(`use a duration such as "30d" or "72h", or "0" to keep recovery refs forever`)
+	}
+	return value, nil
 }
 
 func expandPath(path, home string) (string, error) {
@@ -174,7 +213,7 @@ func expandPath(path, home string) (string, error) {
 }
 
 func (c Config) Show(w io.Writer) error {
-	_, err := fmt.Fprintf(w, "Global: %s\nRepository: %s\n\nbase = %q  (%s)\nworktree_root = %q  (%s)\ncopy_globs = %q  (%s)\nfetch.max_age = %s  (%s)\nfetch.timeout = %s  (%s)\n",
-		c.Files.Global, c.Files.Repository, c.Base, c.Sources["base"], c.WorktreeRoot, c.Sources["worktree_root"], c.CopyGlobs, c.Sources["copy_globs"], c.Fetch.MaxAge, c.Sources["fetch.max_age"], c.Fetch.Timeout, c.Sources["fetch.timeout"])
+	_, err := fmt.Fprintf(w, "Global: %s\nRepository: %s\n\nbase = %q  (%s)\nworktree_root = %q  (%s)\ncopy_globs = %q  (%s)\nfetch.max_age = %s  (%s)\nfetch.timeout = %s  (%s)\nrecovery.keep = %s  (%s)\n",
+		c.Files.Global, c.Files.Repository, c.Base, c.Sources["base"], c.WorktreeRoot, c.Sources["worktree_root"], c.CopyGlobs, c.Sources["copy_globs"], c.Fetch.MaxAge, c.Sources["fetch.max_age"], c.Fetch.Timeout, c.Sources["fetch.timeout"], c.Recovery.Keep, c.Sources["recovery.keep"])
 	return err
 }

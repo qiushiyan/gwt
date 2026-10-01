@@ -7,130 +7,347 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
+// Removal is one target's outcome. RecoveryRef keeps what the removal made
+// unreachable: a snapshot of discarded changes (parented on HEAD, so it keeps
+// the tip as well), else the tip of a force-deleted branch or of a removed
+// detached checkout. `git branch <name> <ref>` restores it.
 type Removal struct {
 	OK              bool   `json:"ok"`
+	Target          string `json:"target"`
 	Path            string `json:"path,omitempty"`
 	Branch          string `json:"branch"`
 	WorktreeRemoved bool   `json:"worktree_removed"`
 	BranchDeleted   bool   `json:"branch_deleted"`
+	RecoveryRef     string `json:"recovery_ref,omitempty"`
 	Error           string `json:"error,omitempty"`
 }
 
-// Remove is deliberately non-interactive. The named branch identifies a Git
-// registration, not a directory guessed from config (roots can change).
-// Force permits deleting unmerged commits, never a dirty or locked checkout.
-func (r *Repo) Remove(ctx context.Context, branch string, force bool) (Removal, error) {
-	result := Removal{Branch: branch}
-	if err := r.validate(ctx, branch); err != nil {
-		return result, err
+type RemoveOptions struct {
+	Force        bool   // delete an unmerged branch, keeping its tip as a recovery ref
+	DiscardDirty bool   // snapshot uncommitted work to a recovery ref, then remove
+	KeepBranch   bool   // remove the checkout only
+	ExpectHead   string // refuse unless the target's commit is still this one
+}
+
+// Recovery refs live outside refs/heads, so no branch list or completion shows
+// them, and keep their objects through gc until recovery.keep expires them.
+const recoveryNS = "refs/wt-trash"
+
+// Trash batches younger than this may belong to a removal still sweeping.
+const trashGrace = 2 * time.Minute
+
+var errUnmerged = errors.New("unmerged")
+
+// refusal is the one eligibility rule: why remove with o refuses this
+// worktree, or nil. list's removable is refusal with no options. Without a
+// verdict in Merged a branch counts as unmerged; Remove judges it itself.
+func (w *Worktree) refusal(o RemoveOptions) error {
+	switch {
+	case w.Main:
+		return fmt.Errorf("refusing to remove the main worktree: %s", w.Path)
+	case w.Current:
+		return errors.New("refusing to remove the current worktree; run gwt remove from another checkout")
+	case w.Locked:
+		return fmt.Errorf("worktree is locked: %s; unlock it explicitly before removal", w.Path)
+	case w.nests != "":
+		return fmt.Errorf("worktree %s contains another worktree, %s; remove that one first", w.Path, w.nests)
+	case w.Dirty && w.Error != "" && !o.DiscardDirty:
+		return fmt.Errorf("cannot read the worktree's status, so its changes are unknown: %s", w.Error)
+	case w.Dirty && !o.DiscardDirty:
+		return fmt.Errorf("worktree has uncommitted, untracked, or index-hidden changes: %s; commit or move them, or pass --discard-dirty to snapshot them to a recovery ref", w.Path)
+	case w.Branch != "" && !o.KeepBranch && !o.Force && (w.Merged == nil || !*w.Merged):
+		return errUnmerged
 	}
-	list, err := git(ctx, r.dir, "worktree", "list", "--porcelain", "-z")
-	if err != nil {
-		return result, err
-	}
-	for record := range strings.SplitSeq(list, "\x00\x00") {
-		var path, ref string
-		locked := false
-		for field := range strings.SplitSeq(record, "\x00") {
-			switch {
-			case strings.HasPrefix(field, "worktree "):
-				path = strings.TrimPrefix(field, "worktree ")
-			case strings.HasPrefix(field, "branch "):
-				ref = strings.TrimPrefix(field, "branch ")
-			case field == "locked" || strings.HasPrefix(field, "locked "):
-				locked = true
+	return nil
+}
+
+// Remove is deliberately non-interactive. A target is a branch, found through
+// Git's registration rather than a path guessed from config (roots change),
+// or a checkout path (absolute or ./-relative), which reaches detached
+// checkouts. A branch without a checkout is a branch-only target. Targets
+// share one batch: one trash directory and one recovery-ref prefix.
+//
+// A checkout is renamed into <worktree_root>/.trash (instant on one
+// filesystem), unregistered, and swept by a detached process, so a caller
+// that exits at once, like a closing tmux popup, neither waits for large
+// dependency trees nor kills the sweep. The dirt check happens just before the
+// rename; nothing irreversible happens without a recovery ref.
+func (r *Repo) Remove(ctx context.Context, targets []string, o RemoveOptions) []Removal {
+	out := make([]Removal, len(targets))
+	list, err := r.registered(ctx)
+	rm := remover{r: r, o: o, list: list, memo: r.loadVerdicts(),
+		batch: fmt.Sprintf("%d.%d", time.Now().Unix(), os.Getpid()),
+		trash: filepath.Join(r.config.WorktreeRoot, ".trash")}
+	for i, target := range targets {
+		out[i].Target = target
+		if err == nil {
+			err := rm.remove(ctx, &out[i], i+1)
+			if err != nil {
+				out[i].Error = err.Error()
 			}
-		}
-		if ref != "refs/heads/"+branch {
-			continue
-		}
-		if result.Path != "" {
-			return result, fmt.Errorf("branch %q is checked out in multiple worktrees; inspect git worktree list before choosing a checkout to remove", branch)
-		}
-		result.Path = path
-		if locked {
-			return result, fmt.Errorf("worktree is locked: %s; unlock it explicitly before removal", path)
+			out[i].OK = err == nil
+		} else {
+			out[i].Error = err.Error()
 		}
 	}
-	if result.Path == "" {
-		return result, fmt.Errorf("no registered worktree for branch %q; inspect git worktree list and git branch --list before choosing a cleanup action", branch)
-	}
-	path, err := filepath.EvalSymlinks(result.Path)
-	missing := os.IsNotExist(err)
-	if missing {
-		path = filepath.Clean(result.Path)
-	} else if err != nil {
-		return result, fmt.Errorf("cannot access registered worktree %s: %w", result.Path, err)
-	}
-	main, err := filepath.EvalSymlinks(r.main)
+	rm.memo.save()
+	sweep(rm.trash, rm.batch)
+	r.expireRecovery(ctx, time.Now())
+	return out
+}
+
+type remover struct {
+	r            *Repo
+	o            RemoveOptions
+	list         []Worktree
+	memo         *verdicts
+	trunk        *Trunk
+	batch, trash string
+}
+
+func (m *remover) remove(ctx context.Context, res *Removal, slot int) error {
+	r, o := m.r, m.o
+	w, err := m.find(ctx, res.Target)
 	if err != nil {
-		return result, err
+		return err
 	}
-	if path == main {
-		return result, fmt.Errorf("refusing to remove the main worktree: %s", path)
-	}
-	cwd, err := filepath.EvalSymlinks(r.dir)
-	if err != nil {
-		return result, err
-	}
-	if cwd == path || strings.HasPrefix(cwd, path+string(filepath.Separator)) {
-		return result, fmt.Errorf("refusing to remove the current worktree; run gwt remove from another checkout")
-	}
-	if !missing {
-		status, err := git(ctx, path, "status", "--porcelain", "--untracked-files=all")
-		if err != nil {
-			return result, err
+	var tip string
+	if w != nil {
+		res.Path, res.Branch, tip = w.Path, w.Branch, w.Head
+		if !w.Prunable {
+			probe(ctx, w)
 		}
-		if status != "" {
-			return result, fmt.Errorf("worktree has uncommitted or untracked changes: %s; commit or move them before removal", path)
+	} else {
+		res.Branch = res.Target
+		if tip, err = git(ctx, r.dir, "rev-parse", "--verify", "refs/heads/"+res.Branch); err != nil {
+			return fmt.Errorf("no registered worktree or local branch %q; inspect git worktree list and git branch --list before choosing a cleanup action", res.Branch)
 		}
 	}
-	if !force {
-		// Integration is measured against the trunk, refreshed when stale, so a
-		// PR squash-merged on GitHub minutes ago counts without a manual fetch.
-		trunk, err := r.Trunk(ctx, true)
-		if err != nil {
-			return result, err
+	if o.ExpectHead != "" {
+		want, err := git(ctx, r.dir, "rev-parse", "--verify", "--end-of-options", o.ExpectHead+"^{commit}")
+		if err != nil || want != tip {
+			return fmt.Errorf("%s is at %s, not the expected %s; inspect git log %s before removing it", res.Target, short(tip), o.ExpectHead, res.Target)
 		}
-		tip, err := git(ctx, r.dir, "rev-parse", "--verify", "refs/heads/"+branch)
-		if err != nil {
-			return result, err
+	}
+	deleting := res.Branch != "" && !o.KeepBranch
+	if w == nil && !deleting {
+		return fmt.Errorf("nothing to remove: branch %q has no checkout and --keep-branch keeps it", res.Branch)
+	}
+	// The verdict, which may fetch, comes after the cheap refusals.
+	if w != nil {
+		if err := w.refusal(o); err != nil && !errors.Is(err, errUnmerged) {
+			return err
 		}
-		memo := r.loadVerdicts()
-		merged, err := r.merged(ctx, memo, tip, trunk.Commit)
-		memo.save()
+	}
+	if deleting && !o.Force {
+		merged, err := m.judge(ctx, tip)
 		if err != nil {
-			return result, err
+			return err
 		}
 		if !merged {
-			return result, fmt.Errorf("branch %q has work not confirmed in %s (%s); inspect git log --oneline %s..%s and the branch diff before using --force to discard it", branch, trunk.Name, trunk.Commit[:12], trunk.Commit, tip)
+			return m.unmerged(res.Branch, tip)
 		}
 	}
-	// Git rechecks dirt, locking, and registration immediately before removal.
-	if _, err := git(ctx, r.dir, "worktree", "remove", "--", result.Path); err != nil {
-		return result, err
+	// Keep what this removal makes unreachable.
+	keep, name := "", res.Branch
+	if name == "" {
+		name = "detached"
 	}
-	result.WorktreeRemoved = true
-	// Patch-equivalent squash/rebase merges need -D: Git branch -d only checks
-	// ancestry. The integration check above owns this decision.
-	if _, err := git(ctx, r.dir, "branch", "-D", "--", branch); err != nil {
-		return result, fmt.Errorf("worktree removed, but branch %q remains: %w; inspect git branch -v and resolve the deletion error before deleting the branch directly", branch, err)
+	switch {
+	case w != nil && w.Dirty:
+		if keep, err = snapshot(ctx, w.Path, "gwt remove: uncommitted work in "+name); err != nil {
+			return fmt.Errorf("could not snapshot the uncommitted work, so the checkout stays: %w", err)
+		}
+	case deleting && o.Force, w != nil && w.Branch == "":
+		keep = tip
 	}
-	result.BranchDeleted, result.OK = true, true
-	// Clean only empty parents under the current configured root. A worktree
-	// created under an older root can still be removed without sweeping that root.
-	root, err := filepath.EvalSymlinks(r.root)
-	if err == nil {
-		for parent := filepath.Dir(path); strings.HasPrefix(parent, root+string(filepath.Separator)); parent = filepath.Dir(parent) {
-			if err := os.Remove(parent); err != nil {
-				break
+	if keep != "" {
+		// The slot keeps feat and feat/x apart: flattened they could collide,
+		// and refs cannot hold both .../feat and .../feat/x.
+		ref := fmt.Sprintf("%s/%s/%03d-%s", recoveryNS, m.batch, slot, strings.ReplaceAll(name, "/", "-"))
+		if _, err := git(ctx, r.dir, "update-ref", ref, keep, ""); err != nil {
+			return fmt.Errorf("could not keep a recovery ref, so nothing was removed: %w", err)
+		}
+		res.RecoveryRef = ref
+	}
+	if w != nil {
+		if !w.Prunable {
+			dest := filepath.Join(m.trash, m.batch)
+			if err := os.MkdirAll(dest, 0755); err != nil {
+				return fmt.Errorf("could not create the trash: %w", err)
+			}
+			if err := os.Rename(w.Path, filepath.Join(dest, strconv.Itoa(slot))); err != nil {
+				return fmt.Errorf("could not move the checkout into %s, so it stays: %w", dest, err)
 			}
 		}
+		// The directory is gone, so this drops only the registration.
+		if _, err := git(ctx, r.dir, "worktree", "remove", "--", w.Path); err != nil {
+			return fmt.Errorf("checkout moved to the trash, but its registration remains: %w; run git worktree prune", err)
+		}
+		res.WorktreeRemoved = true
+		r.removeEmptyParents(w.Path)
 	}
-	return result, nil
+	if deleting {
+		// -D: squash and rebase merges fail git's ancestry-only -d, and the
+		// verdict or --force (with its recovery ref) already decided.
+		if _, err := git(ctx, r.dir, "branch", "-D", "--", res.Branch); err != nil {
+			return fmt.Errorf("branch %q remains: %w; inspect git branch -v and resolve the deletion error before deleting the branch directly", res.Branch, err)
+		}
+		res.BranchDeleted = true
+	}
+	return nil
+}
+
+// find resolves a target to its registration, or nil for a branch without a
+// checkout.
+func (m *remover) find(ctx context.Context, target string) (*Worktree, error) {
+	if filepath.IsAbs(target) || strings.HasPrefix(target, ".") {
+		path := target
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(m.r.dir, path)
+		}
+		for i := range m.list {
+			if canonical(m.list[i].Path) == canonical(path) {
+				return &m.list[i], nil
+			}
+		}
+		return nil, fmt.Errorf("no registered worktree at %s; inspect git worktree list", path)
+	}
+	if err := m.r.validate(ctx, target); err != nil {
+		return nil, err
+	}
+	var found *Worktree
+	for i := range m.list {
+		if m.list[i].Branch == target {
+			if found != nil {
+				return nil, fmt.Errorf("branch %q is checked out in multiple worktrees; inspect git worktree list before choosing a checkout to remove", target)
+			}
+			found = &m.list[i]
+		}
+	}
+	return found, nil
+}
+
+// judge reports whether tip is merged into the trunk, refreshed when stale, so
+// a PR squash-merged on GitHub minutes ago counts without a manual fetch.
+func (m *remover) judge(ctx context.Context, tip string) (bool, error) {
+	if m.trunk == nil {
+		t, err := m.r.Trunk(ctx, true)
+		if err != nil {
+			return false, err
+		}
+		m.trunk = &t
+	}
+	return m.r.merged(ctx, m.memo, tip, m.trunk.Commit)
+}
+
+func (m *remover) unmerged(branch, tip string) error {
+	t := m.trunk
+	return fmt.Errorf("branch %q has work not confirmed in %s (%s); inspect git log --oneline %s..%s and the branch diff before using --force, which keeps its tip as a recovery ref", branch, t.Name, short(t.Commit), short(t.Commit), short(tip))
+}
+
+func short(sha string) string { return sha[:min(12, len(sha))] }
+
+// snapshot commits a checkout's entire working state, tracked edits and
+// untracked files alike, parented on HEAD, and returns the commit. Not `git
+// stash create`: that keeps tracked changes only, and an agent's dirt is
+// mostly new files. A scratch GIT_INDEX_FILE leaves the checkout's own index
+// and the shared stash list alone, and `add -A` still obeys .gitignore, so
+// dependency trees stay out. The scratch index starts without the checkout's
+// assume-unchanged/skip-worktree flags, so edits they hid are kept too.
+func snapshot(ctx context.Context, path, message string) (string, error) {
+	dir, err := os.MkdirTemp("", "gwt-snapshot-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	env := []string{"GIT_INDEX_FILE=" + filepath.Join(dir, "index")}
+	args := append(scratchIdentity(), "commit-tree", "-m", message)
+	if head, err := git(ctx, path, "rev-parse", "--verify", "--quiet", "HEAD"); err == nil && head != "" {
+		if _, err := gitEnv(ctx, path, env, "read-tree", "HEAD"); err != nil {
+			return "", err
+		}
+		args = append(args, "-p", head)
+	}
+	if _, err := gitEnv(ctx, path, env, "add", "-A"); err != nil {
+		return "", err
+	}
+	tree, err := gitEnv(ctx, path, env, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	return git(ctx, path, append(args, tree)...)
+}
+
+// Objects gwt writes for itself need neither the user's identity nor signing.
+func scratchIdentity() []string {
+	return []string{"-c", "user.name=gwt", "-c", "user.email=gwt@localhost", "-c", "commit.gpgSign=false"}
+}
+
+// removeEmptyParents removes the empty directories a slashed branch leaves,
+// only under the current configured root. A checkout under an older root can
+// still be removed without sweeping that root. Never a scan: one walk over
+// sibling checkouts' dependency trees once turned a removal into a minute.
+func (r *Repo) removeEmptyParents(path string) {
+	root, err := filepath.EvalSymlinks(r.root)
+	if err != nil {
+		return
+	}
+	for parent := filepath.Dir(canonical(path)); strings.HasPrefix(parent, root+string(filepath.Separator)); parent = filepath.Dir(parent) {
+		if os.Remove(parent) != nil {
+			return
+		}
+	}
+}
+
+// sweep deletes this batch's trash, and any batch a killed run left behind,
+// in a new session: it outlives the caller and the hangup a closing tmux popup
+// sends its process group. Batches younger than trashGrace may still belong to
+// another run, so they are left to it.
+func sweep(trash, batch string) {
+	entries, _ := os.ReadDir(trash)
+	var doomed []string
+	for _, e := range entries {
+		info, err := e.Info()
+		if e.Name() == batch || (err == nil && time.Since(info.ModTime()) > trashGrace) {
+			doomed = append(doomed, filepath.Join(trash, e.Name()))
+		}
+	}
+	if len(doomed) == 0 {
+		return
+	}
+	cmd := exec.Command("rm", append([]string{"-rf", "--"}, doomed...)...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if cmd.Start() == nil {
+		cmd.Process.Release()
+	}
+}
+
+// expireRecovery drops recovery refs older than recovery.keep: refs keep their
+// objects forever, so a net nobody prunes is a disk leak. The batch name starts
+// with its epoch, so the age is in the ref name.
+func (r *Repo) expireRecovery(ctx context.Context, now time.Time) {
+	keep := r.config.Recovery.Keep
+	if keep <= 0 {
+		return
+	}
+	refs, err := git(ctx, r.dir, "for-each-ref", "--format=%(refname)", recoveryNS)
+	if err != nil {
+		return
+	}
+	for ref := range strings.SplitSeq(refs, "\n") {
+		batch, _, _ := strings.Cut(strings.TrimPrefix(ref, recoveryNS+"/"), "/")
+		epoch, _, _ := strings.Cut(batch, ".")
+		if sec, err := strconv.ParseInt(epoch, 10, 64); err == nil && now.Sub(time.Unix(sec, 0)) > keep {
+			git(ctx, r.dir, "update-ref", "-d", ref)
+		}
+	}
 }
 
 // mergedInto recognizes ancestry, squash merges, and replayed commits, in that
@@ -154,8 +371,8 @@ func (r *Repo) mergedInto(ctx context.Context, branch, base string) (bool, error
 		return false, err
 	}
 	// This temporary object gives git cherry the branch's combined patch without
-	// changing any ref. It needs neither the user's identity nor commit signing.
-	squash, err := git(ctx, r.dir, "-c", "user.name=gwt", "-c", "user.email=gwt@localhost", "-c", "commit.gpgSign=false", "commit-tree", tree, "-p", ancestor, "-m", "gwt integration check")
+	// changing any ref.
+	squash, err := git(ctx, r.dir, append(scratchIdentity(), "commit-tree", tree, "-p", ancestor, "-m", "gwt integration check")...)
 	if err != nil {
 		return false, err
 	}

@@ -70,8 +70,11 @@ func TestListReportsStateAndVerdicts(t *testing.T) {
 	if !w["dirty"].Dirty || w["main"].Dirty {
 		t.Fatalf("dirt: %+v %+v", w["dirty"], w["main"])
 	}
-	if !w["gone"].Prunable || w["gone"].Merged != nil {
+	if !w["gone"].Prunable || !isTrue(w["gone"].Merged) || !w["gone"].Removable {
 		t.Fatalf("prunable: %+v", w["gone"])
+	}
+	if !w["landed"].Removable || w["pending"].Removable || w["dirty"].Removable || w["main"].Removable {
+		t.Fatalf("removable: %+v", l.Worktrees)
 	}
 	if d := w["(detached) detached"]; d.Path == "" || d.Merged != nil || d.Head == "" {
 		t.Fatalf("detached: %+v", d)
@@ -160,7 +163,7 @@ func TestStaleTrunkIsRefreshed(t *testing.T) {
 
 	// An unreachable remote warns, keeps cached refs, and removal refuses.
 	f.mustGit(f.dir, "remote", "set-url", "origin", filepath.Join(f.home, "nowhere.git"))
-	result, err := f.r.Remove(context.Background(), "feature", false)
+	result, err := remove1(f.r, "feature", RemoveOptions{})
 	if err == nil || result.WorktreeRemoved || !strings.Contains(err.Error(), "origin/develop") {
 		t.Fatalf("%+v %v", result, err)
 	}
@@ -176,7 +179,7 @@ func TestStaleTrunkIsRefreshed(t *testing.T) {
 	if w := byBranch(t, l)["feature"]; !isTrue(w.Merged) || !l.Trunk.Fetched || l.Trunk.Stale {
 		t.Fatalf("refreshed trunk: %+v %+v", l.Trunk, w)
 	}
-	result, err = f.r.Remove(context.Background(), "feature", false)
+	result, err = remove1(f.r, "feature", RemoveOptions{})
 	if err != nil || !result.OK {
 		t.Fatalf("%+v %v", result, err)
 	}

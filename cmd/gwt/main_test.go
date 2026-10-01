@@ -123,6 +123,16 @@ func TestCommandContract(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &removed); err != nil || removed.OK || removed.Error == "" {
 		t.Fatalf("%+v %v", removed, err)
 	}
+	// Several targets print one JSON line each; one failure fails the command.
+	if rc := call("remove", "gone/a", "./gone-b", "--json"); rc != 1 {
+		t.Fatalf("batch: %d", rc)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	var first, second struct{ Target, Error string }
+	if len(lines) != 2 || json.Unmarshal([]byte(lines[0]), &first) != nil || json.Unmarshal([]byte(lines[1]), &second) != nil ||
+		first.Target != "gone/a" || second.Target != "./gone-b" || first.Error == "" || second.Error == "" {
+		t.Fatalf("batch JSON: %q", &stdout)
+	}
 	// Even --no-copy must not hide a malformed config file.
 	if err := os.WriteFile(configPath, []byte("copy_globs = [\"[\"]"), 0600); err != nil {
 		t.Fatal(err)
@@ -158,8 +168,10 @@ func TestInvalidArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{}, {"--bogus"}, {"create"}, {"a", "b", "c"}, {"resolve", "a", "b"},
 		{"resolve", "a", "--new"}, {"resolve", "a", "--no-copy"},
-		{"config"}, {"config", "show", "--no-fetch"}, {"path", "a", "b"}, {"create", "a", "--force"}, {"remove"}, {"remove", "a", "b"},
-		{"remove", "a", "b", "--json"}, {"--cd", "a"}, {"create", "a", "--cd"}, {"remove", "a", "--cd"}, {"path", "--cd"},
+		{"config"}, {"config", "show", "--no-fetch"}, {"path", "a", "b"}, {"create", "a", "--force"}, {"remove"},
+		{"remove", "a", "b", "--expect-head", "HEAD"}, {"remove", "a", "--expect-head"}, {"create", "a", "--keep-branch"},
+		{"list", "--discard-dirty"}, {"merged", "a", "--expect-head=HEAD"},
+		{"--cd", "a"}, {"create", "a", "--cd"}, {"remove", "a", "--cd"}, {"path", "--cd"},
 		{"path", "a", "--no-clipboard"}, {"remove", "a", "--no-clipboard"},
 	} {
 		var out, stderr bytes.Buffer

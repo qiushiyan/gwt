@@ -31,8 +31,14 @@ func put(t *testing.T, path, content string) {
 func TestLayersAndSources(t *testing.T) {
 	home, global, common := fixture(t)
 	c, err := Load(home, common)
-	if err != nil || c.Base != "HEAD" || c.Fetch.Timeout != 8*time.Second || c.Sources["copy_globs"] != "builtin" {
+	if err != nil || c.Base != "HEAD" || c.Fetch.Timeout != 8*time.Second || c.Sources["copy_globs"] != "builtin" || c.Recovery.Keep != 30*24*time.Hour {
 		t.Fatalf("%+v %v", c, err)
+	}
+	for value, want := range map[string]time.Duration{`"7d"`: 7 * 24 * time.Hour, `"36h"`: 36 * time.Hour, `"0"`: 0} {
+		put(t, global, "recovery.keep = "+value)
+		if c, err := Load(home, common); err != nil || c.Recovery.Keep != want || c.Sources["recovery.keep"] != global {
+			t.Fatalf("recovery.keep = %s: %+v %v", value, c.Recovery, err)
+		}
 	}
 	put(t, global, `base = "origin/main"
 worktree_root = "~/trees"
@@ -110,6 +116,9 @@ func TestInvalidConfig(t *testing.T) {
 		"zero time":      `fetch.timeout = "0s"`,
 		"negative time":  `fetch.max_age = "-5m"`,
 		"bad time":       `fetch.timeout = "soon"`,
+		"fractional day": `recovery.keep = "1.5d"`,
+		"negative keep":  `recovery.keep = "-1d"`,
+		"bad keep":       `recovery.keep = "a month"`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			home, global, common := fixture(t)
