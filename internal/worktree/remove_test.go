@@ -441,6 +441,39 @@ func TestRemoveRevalidatesAfterTheVerdict(t *testing.T) {
 	}
 }
 
+// A commit that lands on the branch after the recheck survives: the delete
+// names the tip that was judged and kept, so a newer tip refuses it.
+func TestRemoveKeepsATipThatMovedAfterTheRecheck(t *testing.T) {
+	f := setup(t)
+	main := f.mustGit(f.dir, "rev-parse", "HEAD")
+	tree := f.mustGit(f.dir, "rev-parse", "HEAD^{tree}")
+	tip := f.mustGit(f.dir, "commit-tree", tree, "-p", main, "-m", "unmerged")
+	f.mustGit(f.dir, "branch", "racing", tip)
+	late := f.mustGit(f.dir, "commit-tree", tree, "-p", tip, "-m", "late")
+	// Writing the recovery ref is the last ref update before the delete; the
+	// hook advances the branch right then.
+	ran := filepath.Join(f.home, "advanced")
+	write(t, filepath.Join(f.r.common, "hooks", "reference-transaction"), `#!/bin/sh
+[ "$1" = committed ] || exit 0
+grep -q ' refs/wt-trash/' || exit 0
+[ -e "$RAN" ] && exit 0
+touch "$RAN"
+git update-ref refs/heads/racing "$LATE"
+`, 0755)
+	t.Setenv("RAN", ran)
+	t.Setenv("LATE", late)
+	result, err := remove1(f.r, "racing", RemoveOptions{Force: true})
+	if !f.exists(ran) {
+		t.Fatal("the hook never advanced the branch; the case tests nothing")
+	}
+	if err == nil || result.BranchDeleted || !strings.Contains(err.Error(), "remains") {
+		t.Fatalf("%+v %v", result, err)
+	}
+	if got := f.mustGit(f.dir, "rev-parse", "refs/heads/racing"); got != late {
+		t.Fatalf("branch is %s, want the late commit %s", got, late)
+	}
+}
+
 // A checkout already in the trash when unregistering it fails is gone, and
 // the result says so: the sweep deletes it either way.
 func TestRemoveReportsAMovedCheckout(t *testing.T) {
