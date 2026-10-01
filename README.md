@@ -192,7 +192,7 @@ trunk by the verdict above; removal refreshes a stale remote trunk first, so a
 PR squash-merged on GitHub minutes ago counts. `--keep-branch` removes only the
 checkout. `--expect-head` refuses unless the single target is still at that
 commit, which closes the race between deciding and removing (brief's closeout
-passes the merged PR's head). The verdict can fetch, so after it the commit and
+and the clean-worktrees runner pass the commit they judged). The verdict can fetch, so after it the commit and
 the dirt are read again, just before anything is kept or moved; a target that
 changed meanwhile is refused. The branch is deleted only from the commit that
 was judged (`git update-ref -d` with the expected value). A writer still
@@ -258,7 +258,9 @@ checkout; its callers do.
   freshness, activity, and process checks stay its own. Its runner archives
   ignored files, then calls `gwt remove --keep-branch --expect-head`.
 - `brief closeout` emits `gwt remove` commands for a merged branch, with
-  `--force --expect-head <PR head>` for a squash merge.
+  `--force --expect-head <PR head>` for a squash merge, and
+  `<path> --keep-branch --expect-head <local tip>` for the checkout of a
+  branch it holds.
 - The `enter-worktree` skill calls the installed binary and enters its returned
   path.
 
