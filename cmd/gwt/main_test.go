@@ -123,14 +123,26 @@ func TestCommandContract(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &removed); err != nil || removed.OK || removed.Error == "" {
 		t.Fatalf("%+v %v", removed, err)
 	}
-	// Several targets print one JSON line each; one failure fails the command.
-	if rc := call("remove", "gone/a", "./gone-b", "--json"); rc != 1 {
+	// Several targets print one JSON line each; a failed target neither stops
+	// the ones after it nor lets the command succeed.
+	if rc := call("create", "agent/three", "--non-interactive"); rc != 0 {
+		t.Fatalf("%d: %s", rc, &stderr)
+	}
+	if rc := call("remove", "gone/a", "agent/three", "./gone-b", "--json"); rc != 1 {
 		t.Fatalf("batch: %d", rc)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	var first, second struct{ Target, Error string }
-	if len(lines) != 2 || json.Unmarshal([]byte(lines[0]), &first) != nil || json.Unmarshal([]byte(lines[1]), &second) != nil ||
-		first.Target != "gone/a" || second.Target != "./gone-b" || first.Error == "" || second.Error == "" {
+	var batch [3]struct {
+		Target, Error string
+		OK            bool
+		Removed       bool `json:"worktree_removed"`
+	}
+	for i := range lines[:min(3, len(lines))] {
+		json.Unmarshal([]byte(lines[i]), &batch[i])
+	}
+	if len(lines) != 3 || batch[0].Target != "gone/a" || batch[0].Error == "" ||
+		batch[1].Target != "agent/three" || !batch[1].OK || !batch[1].Removed ||
+		batch[2].Target != "./gone-b" || batch[2].Error == "" {
 		t.Fatalf("batch JSON: %q", &stdout)
 	}
 	// Even --no-copy must not hide a malformed config file.

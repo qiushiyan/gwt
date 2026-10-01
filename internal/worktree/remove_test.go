@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -259,6 +261,26 @@ func TestRemoveDiscardDirtySnapshots(t *testing.T) {
 	}
 }
 
+// A staged version later changed in the working tree is in neither HEAD nor
+// the working state; the snapshot's second parent keeps the index.
+func TestRemoveDiscardDirtyKeepsTheIndex(t *testing.T) {
+	f := setup(t)
+	x := f.create(Options{Branch: "staged"})
+	write(t, filepath.Join(x.Path, "file"), "base\n", 0644)
+	f.mustGit(x.Path, "add", "file")
+	f.mustGit(x.Path, "commit", "-qm", "base")
+	write(t, filepath.Join(x.Path, "file"), "staged only\n", 0644)
+	f.mustGit(x.Path, "add", "file")
+	write(t, filepath.Join(x.Path, "file"), "base\n", 0644)
+	result, err := remove1(f.r, "staged", RemoveOptions{DiscardDirty: true, KeepBranch: true})
+	if err != nil || !result.WorktreeRemoved {
+		t.Fatalf("%+v %v", result, err)
+	}
+	if got, err := git(context.Background(), f.dir, "show", result.RecoveryRef+"^2:file"); err != nil || got != "staged only" {
+		t.Fatalf("staged content: %q %v", got, err)
+	}
+}
+
 // The snapshot is built in a scratch index: staging the user's files as a
 // side effect would change the state being preserved.
 func TestSnapshotLeavesCheckoutIndexAlone(t *testing.T) {
@@ -276,12 +298,11 @@ func TestSnapshotLeavesCheckoutIndexAlone(t *testing.T) {
 	}
 }
 
-// One batch, distinct refs: feat and feat/x flatten alike, and refs cannot
-// hold both .../feat and .../feat/x.
+// One batch, distinct refs: feat/x and feat-x flatten alike.
 func TestRemoveBatchKeepsRefsApart(t *testing.T) {
 	f := setup(t)
 	var paths []string
-	for _, b := range []string{"feat", "feat-x"} {
+	for _, b := range []string{"feat/x", "feat-x"} {
 		x := f.create(Options{Branch: b})
 		write(t, filepath.Join(x.Path, "wip"), b, 0644)
 		paths = append(paths, x.Path)
@@ -291,34 +312,58 @@ func TestRemoveBatchKeepsRefsApart(t *testing.T) {
 	if !results[0].OK || !results[1].OK || a == b || filepath.Dir(a) != filepath.Dir(b) {
 		t.Fatalf("%+v", results)
 	}
-	if f.mustGit(f.dir, "show", a+":wip") != "feat" || f.mustGit(f.dir, "show", b+":wip") != "feat-x" {
+	if f.mustGit(f.dir, "show", a+":wip") != "feat/x" || f.mustGit(f.dir, "show", b+":wip") != "feat-x" {
 		t.Fatal("a snapshot overwrote the other")
 	}
 }
 
-// Recovery refs pin objects forever unless they expire; 0 keeps them.
+// Recovery refs pin objects forever unless they expire; 0 keeps them. Every
+// removal expires them.
 func TestRecoveryRefsExpire(t *testing.T) {
 	f := setup(t)
 	head := f.mustGit(f.dir, "rev-parse", "HEAD")
-	now := time.Now()
 	old := recoveryNS + "/1700000000.1/001-old"
-	recent := fmt.Sprintf("%s/%d.1/001-recent", recoveryNS, now.Unix())
+	recent := fmt.Sprintf("%s/%d.1/001-recent", recoveryNS, time.Now().Unix())
 	f.mustGit(f.dir, "update-ref", old, head)
 	f.mustGit(f.dir, "update-ref", recent, head)
-	f.r.expireRecovery(context.Background(), now)
+	f.mustGit(f.dir, "branch", "first")
+	if _, err := remove1(f.r, "first", RemoveOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	if f.hasRef(old) || !f.hasRef(recent) {
 		t.Fatal("30-day default: old ref kept or recent ref dropped")
 	}
 	f.configure(`recovery.keep = "0"`)
 	f.mustGit(f.dir, "update-ref", old, head)
-	f.r.expireRecovery(context.Background(), now)
+	f.mustGit(f.dir, "branch", "second")
+	if _, err := remove1(f.r, "second", RemoveOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	if !f.hasRef(old) {
 		t.Fatal("keep = 0 expired a ref")
 	}
 }
 
+// TestHelperRemove is the caller TestRemoveSweepsTrash hangs up; it does
+// nothing unless that test runs it.
+func TestHelperRemove(t *testing.T) {
+	dir := os.Getenv("GWT_TEST_REMOVE_REPO")
+	if dir == "" {
+		return
+	}
+	r, err := Open(context.Background(), dir, os.Getenv("HOME"), os.Stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x := r.Remove(context.Background(), []string{os.Getenv("GWT_TEST_REMOVE_TARGET")}, RemoveOptions{})[0]; !x.OK {
+		t.Fatal(x.Error)
+	}
+}
+
 // The checkout leaves at once; a detached process deletes it with any batch a
-// killed run left, and spares a batch another run may still be sweeping.
+// killed run left, and spares a batch another run may still be sweeping. The
+// deletion survives the hangup a closing tmux popup sends its caller's process
+// group the moment the caller exits.
 func TestRemoveSweepsTrash(t *testing.T) {
 	f := setup(t)
 	trash := filepath.Join(f.home, "dev", ".worktrees", ".trash")
@@ -329,9 +374,17 @@ func TestRemoveSweepsTrash(t *testing.T) {
 	hour := time.Now().Add(-time.Hour)
 	os.Chtimes(abandoned, hour, hour)
 	x := f.create(Options{Branch: "swept"})
-	if _, err := remove1(f.r, "swept", RemoveOptions{}); err != nil {
-		t.Fatal(err)
+	// A slow rm is still running when the hangup lands.
+	bin := t.TempDir()
+	write(t, filepath.Join(bin, "rm"), "#!/bin/sh\nsleep 1\nexec /bin/rm \"$@\"\n", 0755)
+	caller := exec.Command(os.Args[0], "-test.run=^TestHelperRemove$")
+	caller.Env = append(os.Environ(), "GWT_TEST_REMOVE_REPO="+f.dir, "GWT_TEST_REMOVE_TARGET=swept",
+		"PATH="+bin+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	caller.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if out, err := caller.CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
 	}
+	syscall.Kill(-caller.Process.Pid, syscall.SIGHUP)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		entries, _ := os.ReadDir(trash)
@@ -355,6 +408,52 @@ func TestRemoveUsesRegistrationAfterRootChange(t *testing.T) {
 	}
 	if f.exists(x.Path) {
 		t.Fatal("old checkout remains")
+	}
+}
+
+// Evidence read before the verdict's fetch is stale by the time removal acts:
+// a commit or a new file that lands meanwhile stops the removal.
+func TestRemoveRevalidatesAfterTheVerdict(t *testing.T) {
+	for change, act := range map[string]string{
+		"commit": `git -C "$WT" commit -q --allow-empty -m late`,
+		"file":   `echo late > "$WT/late"`,
+	} {
+		t.Run(change, func(t *testing.T) {
+			f := setup(t)
+			remoteFixture(t, f)
+			x := f.create(Options{Branch: "landed", Base: "origin/develop", NoFetch: true})
+			tip := f.mustGit(x.Path, "rev-parse", "HEAD")
+			// The fetch's upload-pack changes the checkout mid-removal.
+			hook := filepath.Join(f.home, "upload-pack")
+			ran := filepath.Join(f.home, "changed")
+			write(t, hook, "#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n"+act+" && touch \"$RAN\"\nexec git-upload-pack \"$@\"\n", 0755)
+			f.mustGit(f.dir, "config", "remote.origin.uploadpack", hook)
+			t.Setenv("WT", x.Path)
+			t.Setenv("RAN", ran)
+			result, err := remove1(f.r, "landed", RemoveOptions{ExpectHead: tip})
+			if !f.exists(ran) {
+				t.Fatal("the fetch never changed the checkout; the case tests nothing")
+			}
+			if err == nil || result.WorktreeRemoved || result.BranchDeleted || !f.exists(x.Path) {
+				t.Fatalf("%+v %v", result, err)
+			}
+		})
+	}
+}
+
+// A checkout already in the trash when unregistering it fails is gone, and
+// the result says so: the sweep deletes it either way.
+func TestRemoveReportsAMovedCheckout(t *testing.T) {
+	f := setup(t)
+	x := f.create(Options{Branch: "moved"})
+	admin := filepath.Join(f.r.common, "worktrees")
+	if err := os.Chmod(admin, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(admin, 0755) })
+	result, err := remove1(f.r, "moved", RemoveOptions{KeepBranch: true})
+	if err == nil || !result.WorktreeRemoved || f.exists(x.Path) || !strings.Contains(err.Error(), "git worktree prune") {
+		t.Fatalf("%+v %v", result, err)
 	}
 }
 

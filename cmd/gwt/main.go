@@ -96,11 +96,14 @@ deletes must be merged into the trunk, which removal refreshes first when stale.
 list's removable applies the same rule. Ignored files go with the checkout,
 which moves to <worktree_root>/.trash and is deleted in the background.
 Whatever removal makes unreachable is kept under refs/wt-trash/<batch>/: the
-snapshot --discard-dirty takes, a --force-deleted tip, a detached HEAD. Restore
-with git branch <name> <ref>. Refs expire after recovery.keep (0 keeps them).
-remove --json prints one object per target: ok, target, path, branch,
-worktree_removed, branch_deleted, recovery_ref, and error on failure. After
-partial removal, inspect the remaining branch before deleting it directly.
+snapshot --discard-dirty takes (its second parent, <ref>^2, holds the index),
+a --force-deleted tip, a detached HEAD. Restore with git branch <name> <ref>.
+Refs expire after recovery.keep (0 keeps them). A target whose commit or dirt
+changed while removal checked it is refused; stop processes working in a
+checkout before removing it. remove --json prints one object per target: ok,
+target, path, branch, worktree_removed (true once the checkout is gone, even
+on failure), branch_deleted, recovery_ref, and error on failure. After partial
+removal, inspect the remaining branch before deleting it directly.
 Exit codes: 0 success, 1 operational failure/declined creation, 2 invalid arguments.
 Invalid arguments print diagnostics on stderr, including with --json.
 `

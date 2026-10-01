@@ -15,7 +15,7 @@ import (
 
 // Removal is one target's outcome. RecoveryRef keeps what the removal made
 // unreachable: a snapshot of discarded changes (parented on HEAD, so it keeps
-// the tip as well), else the tip of a force-deleted branch or of a removed
+// the tip as well, and on a commit of the index), else the tip of a force-deleted branch or of a removed
 // detached checkout. `git branch <name> <ref>` restores it.
 type Removal struct {
 	OK              bool   `json:"ok"`
@@ -76,8 +76,12 @@ func (w *Worktree) refusal(o RemoveOptions) error {
 // A checkout is renamed into <worktree_root>/.trash (instant on one
 // filesystem), unregistered, and swept by a detached process, so a caller
 // that exits at once, like a closing tmux popup, neither waits for large
-// dependency trees nor kills the sweep. The dirt check happens just before the
-// rename; nothing irreversible happens without a recovery ref.
+// dependency trees nor kills the sweep. The commit and the dirt are read again
+// after the verdict's fetch, just before the snapshot and the rename, and a
+// branch goes only from the commit that was judged; nothing irreversible
+// happens without a recovery ref. A writer still at work in the checkout can
+// race that last read: callers stop theirs first. When a removal fails partway,
+// worktree_removed says whether the checkout is already gone.
 func (r *Repo) Remove(ctx context.Context, targets []string, o RemoveOptions) []Removal {
 	out := make([]Removal, len(targets))
 	list, err := r.registered(ctx)
@@ -154,6 +158,11 @@ func (m *remover) remove(ctx context.Context, res *Removal, slot int) error {
 			return m.unmerged(res.Branch, tip)
 		}
 	}
+	// Everything above took time, and a writer may still be at work: read the
+	// commit and the dirt again, so what is kept is what is there now.
+	if err := m.recheck(ctx, w, res.Branch, tip); err != nil {
+		return err
+	}
 	// Keep what this removal makes unreachable.
 	keep, name := "", res.Branch
 	if name == "" {
@@ -168,8 +177,7 @@ func (m *remover) remove(ctx context.Context, res *Removal, slot int) error {
 		keep = tip
 	}
 	if keep != "" {
-		// The slot keeps feat and feat/x apart: flattened they could collide,
-		// and refs cannot hold both .../feat and .../feat/x.
+		// The slot keeps feat/x and feat-x apart: they flatten alike.
 		ref := fmt.Sprintf("%s/%s/%03d-%s", recoveryNS, m.batch, slot, strings.ReplaceAll(name, "/", "-"))
 		if _, err := git(ctx, r.dir, "update-ref", ref, keep, ""); err != nil {
 			return fmt.Errorf("could not keep a recovery ref, so nothing was removed: %w", err)
@@ -186,20 +194,57 @@ func (m *remover) remove(ctx context.Context, res *Removal, slot int) error {
 				return fmt.Errorf("could not move the checkout into %s, so it stays: %w", dest, err)
 			}
 		}
+		// The checkout is gone from here on: the sweep deletes the trash.
+		res.WorktreeRemoved = true
+		r.removeEmptyParents(w.Path)
 		// The directory is gone, so this drops only the registration.
 		if _, err := git(ctx, r.dir, "worktree", "remove", "--", w.Path); err != nil {
 			return fmt.Errorf("checkout moved to the trash, but its registration remains: %w; run git worktree prune", err)
 		}
-		res.WorktreeRemoved = true
-		r.removeEmptyParents(w.Path)
 	}
 	if deleting {
-		// -D: squash and rebase merges fail git's ancestry-only -d, and the
-		// verdict or --force (with its recovery ref) already decided.
-		if _, err := git(ctx, r.dir, "branch", "-D", "--", res.Branch); err != nil {
+		// Only the tip that was judged and kept: a commit made since stays. No
+		// branch -d: squash and rebase merges fail its ancestry-only test, and
+		// the verdict or --force (with its recovery ref) already decided.
+		if _, err := git(ctx, r.dir, "update-ref", "-d", "refs/heads/"+res.Branch, tip); err != nil {
 			return fmt.Errorf("branch %q remains: %w; inspect git branch -v and resolve the deletion error before deleting the branch directly", res.Branch, err)
 		}
 		res.BranchDeleted = true
+		// What branch -D also drops; a branch without settings has no section.
+		git(ctx, r.dir, "config", "--remove-section", "branch."+res.Branch)
+	}
+	return nil
+}
+
+// recheck refuses when the target's commit moved off tip, or its checkout
+// turned dirty without --discard-dirty, since the evidence was first read.
+func (m *remover) recheck(ctx context.Context, w *Worktree, branch, tip string) error {
+	var now string
+	var err error
+	switch {
+	case w != nil && !w.Prunable:
+		now, err = git(ctx, w.Path, "rev-parse", "--verify", "HEAD")
+	case branch != "":
+		now, err = git(ctx, m.r.dir, "rev-parse", "--verify", "refs/heads/"+branch)
+	default:
+		return nil
+	}
+	name := branch
+	if name == "" {
+		name = w.Path
+	}
+	if err != nil {
+		return fmt.Errorf("could not read the commit of %s again, so it stays: %w", name, err)
+	}
+	if now != tip {
+		return fmt.Errorf("%s moved from %s while gwt was checking it; inspect it and run gwt remove again", name, short(tip))
+	}
+	if w == nil || w.Prunable {
+		return nil
+	}
+	probe(ctx, w)
+	if err := w.refusal(m.o); err != nil && !errors.Is(err, errUnmerged) {
+		return err
 	}
 	return nil
 }
@@ -255,34 +300,61 @@ func (m *remover) unmerged(branch, tip string) error {
 func short(sha string) string { return sha[:min(12, len(sha))] }
 
 // snapshot commits a checkout's entire working state, tracked edits and
-// untracked files alike, parented on HEAD, and returns the commit. Not `git
-// stash create`: that keeps tracked changes only, and an agent's dirt is
-// mostly new files. A scratch GIT_INDEX_FILE leaves the checkout's own index
-// and the shared stash list alone, and `add -A` still obeys .gitignore, so
-// dependency trees stay out. The scratch index starts without the checkout's
-// assume-unchanged/skip-worktree flags, so edits they hid are kept too.
+// untracked files alike, and returns the commit. Like a stash, its first
+// parent is HEAD and its second a commit of the index, which holds a staged
+// version the working tree has since changed. Not `git stash create`: that
+// keeps tracked changes only, and an agent's dirt is mostly new files.
+// Scratch index files leave the checkout's own index and the shared stash
+// list alone, and `add -A` still obeys .gitignore, so dependency trees stay
+// out. The working-state index starts without the checkout's
+// assume-unchanged/skip-worktree flags, so edits they hid are kept too. An
+// index with unresolved conflicts has no tree, so it fails the snapshot.
 func snapshot(ctx context.Context, path, message string) (string, error) {
 	dir, err := os.MkdirTemp("", "gwt-snapshot-")
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(dir)
+	var parents []string
+	head, err := git(ctx, path, "rev-parse", "--verify", "--quiet", "HEAD")
+	if err == nil && head != "" {
+		parents = []string{"-p", head}
+	}
+	// A copy, so writing its tree cannot touch the checkout's index.
+	index, err := git(ctx, path, "rev-parse", "--path-format=absolute", "--git-path", "index")
+	if err != nil {
+		return "", err
+	}
+	staged := filepath.Join(dir, "staged")
+	if data, err := os.ReadFile(index); err == nil {
+		if err := os.WriteFile(staged, data, 0600); err != nil {
+			return "", err
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	tree, err := gitEnv(ctx, path, []string{"GIT_INDEX_FILE=" + staged}, "write-tree")
+	if err != nil {
+		return "", fmt.Errorf("the index has no tree: %w", err)
+	}
+	indexCommit, err := git(ctx, path, append(append(scratchIdentity(), "commit-tree", "-m", "index: "+message), append(parents, tree)...)...)
+	if err != nil {
+		return "", err
+	}
 	env := []string{"GIT_INDEX_FILE=" + filepath.Join(dir, "index")}
-	args := append(scratchIdentity(), "commit-tree", "-m", message)
-	if head, err := git(ctx, path, "rev-parse", "--verify", "--quiet", "HEAD"); err == nil && head != "" {
+	if head != "" {
 		if _, err := gitEnv(ctx, path, env, "read-tree", "HEAD"); err != nil {
 			return "", err
 		}
-		args = append(args, "-p", head)
 	}
 	if _, err := gitEnv(ctx, path, env, "add", "-A"); err != nil {
 		return "", err
 	}
-	tree, err := gitEnv(ctx, path, env, "write-tree")
-	if err != nil {
+	if tree, err = gitEnv(ctx, path, env, "write-tree"); err != nil {
 		return "", err
 	}
-	return git(ctx, path, append(args, tree)...)
+	args := append(append(scratchIdentity(), "commit-tree", "-m", message), parents...)
+	return git(ctx, path, append(args, "-p", indexCommit, tree)...)
 }
 
 // Objects gwt writes for itself need neither the user's identity nor signing.

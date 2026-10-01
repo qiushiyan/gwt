@@ -192,16 +192,23 @@ trunk by the verdict above; removal refreshes a stale remote trunk first, so a
 PR squash-merged on GitHub minutes ago counts. `--keep-branch` removes only the
 checkout. `--expect-head` refuses unless the single target is still at that
 commit, which closes the race between deciding and removing (brief's closeout
-passes the merged PR's head).
+passes the merged PR's head). The verdict can fetch, so after it the commit and
+the dirt are read again, just before anything is kept or moved; a target that
+changed meanwhile is refused. The branch is deleted only from the commit that
+was judged (`git update-ref -d` with the expected value). A writer still
+working in the checkout can race that last read, so callers stop their own
+first (the popup kills the checkout's windows before calling gwt).
 
 **Recovery.** Nothing irreversible happens without a ref under
 `refs/wt-trash/<epoch>.<pid>/<slot>-<name>`, outside `refs/heads` so no branch
 list shows it:
 
 - `--discard-dirty` snapshots the checkout's whole working state, untracked
-  files included and ignored ones not, as a commit parented on HEAD. A scratch
-  `GIT_INDEX_FILE` leaves the checkout's index and the stash alone. A checkout
-  that cannot be snapshotted stays.
+  files included and ignored ones not, as a commit shaped like a stash: first
+  parent HEAD, second parent a commit of the index (`<ref>^2`), which holds a
+  staged version the working tree has since changed. Scratch index files leave
+  the checkout's index and the stash alone. A checkout that cannot be
+  snapshotted, such as one with unresolved conflicts, stays.
 - `--force` keeps the deleted branch's tip.
 - A removed detached checkout keeps its HEAD.
 
@@ -224,9 +231,12 @@ target, so an agent can tell refusal from partial completion:
 {"ok":true,"target":"feat/x","path":"/abs/checkout","branch":"feat/x","worktree_removed":true,"branch_deleted":true,"recovery_ref":"refs/wt-trash/1790000000.4242/001-feat-x"}
 ```
 
-Failures carry `error`. If branch deletion fails after the checkout went,
-`worktree_removed` is true and `branch_deleted` false; the branch remains for
-manual cleanup. gwt does not touch tmux windows or processes working in a
+Failures carry `error`. `worktree_removed` is true once the checkout is in the
+trash, even when unregistering it then fails (`git worktree prune` drops the
+registration), so a caller never treats a gone checkout as still there. If
+branch deletion fails after the checkout went, `worktree_removed` is true and
+`branch_deleted` false; the branch remains for manual cleanup. A failed target
+does not stop the batch. gwt does not touch tmux windows or processes working in a
 checkout; its callers do.
 
 ## Integration boundaries
