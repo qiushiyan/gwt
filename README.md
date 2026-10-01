@@ -14,15 +14,19 @@ make check
 make install                    # installs to ~/.local/bin; keep that directory on PATH
 gwt fix/login main              # explicit base, no confirmation
 gwt feat/search                 # confirm forking from current HEAD
+gwt --cd feat/search            # same, then cd into it (zsh function, default off)
 gwt create -n feat/agent-work    # unattended; stdout is only the path
 gwt create -n feat/agent-json --json
 gwt --help
 ```
 
-The binary does not change the caller's directory. The dotfiles `gwtcd` helper
-captures its path and changes the parent shell's directory. Agents use the
-returned path as their working directory. An existing shell may still hold the
-old `gwt` function; run `zshreload` once to pick up the binary.
+The binary does not change the caller's directory: no child process can. The
+dotfiles zsh `gwt` function wraps the binary and, only with `--cd`, captures the
+printed path and changes the parent shell's directory; every other invocation is
+forwarded untouched. `gwtcd` is an alias for `gwt --cd`. Without the function,
+the binary refuses `--cd` before creating anything and says so. Agents use the
+returned path as their working directory. Run `zshreload` once so an existing
+shell picks up the function.
 
 Command names are reserved in the first position. To create a branch named
 `remove`, for example, use `gwt create remove`.
@@ -186,8 +190,9 @@ create recovery snapshots. The tmux popup owns its richer interactive cleanup.
 
 ## Integration boundaries
 
-- Dotfiles zsh completion and `gwtcd` call the binary. No creation logic lives in
-  the shell helper.
+- The dotfiles zsh `gwt` function and its completion wrap the binary; the
+  function adds only the parent-shell `cd` for `--cd`. No creation logic lives
+  in the shell.
 - The tmux popup calls `gwt create -n` using the shared configuration.
   It then opens the window and delivers dependency installation and the agent
   command. Its rows and reap come from `gwt list --json`, its branch cleanup

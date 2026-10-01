@@ -157,11 +157,34 @@ func TestInvalidArguments(t *testing.T) {
 		{}, {"--bogus"}, {"create"}, {"a", "b", "c"}, {"resolve", "a", "b"},
 		{"resolve", "a", "--new"}, {"resolve", "a", "--no-copy"},
 		{"config"}, {"config", "show", "--no-fetch"}, {"path", "a", "b"}, {"create", "a", "--force"}, {"remove"}, {"remove", "a", "b"},
-		{"remove", "a", "b", "--json"},
+		{"remove", "a", "b", "--json"}, {"--cd", "a"}, {"create", "a", "--cd"}, {"remove", "a", "--cd"}, {"path", "--cd"},
 	} {
 		var out, stderr bytes.Buffer
 		if rc := run(context.Background(), args, strings.NewReader(""), &out, &stderr); rc != 2 || out.Len() != 0 {
 			t.Fatalf("%v: %d %s %s", args, rc, &out, &stderr)
 		}
+	}
+}
+
+// Without the zsh wrapper, --cd must refuse before creating and name the fix.
+func TestCDWithoutShellFunction(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("GWT_CONFIG", "")
+	repo := filepath.Join(home, "project")
+	if out, err := exec.Command("git", "init", "-q", "-b", "main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git: %s: %v", out, err)
+	}
+	t.Chdir(repo)
+	var out, stderr bytes.Buffer
+	if rc := run(context.Background(), []string{"--cd", "-n", "feat/cd"}, strings.NewReader(""), &out, &stderr); rc != 2 {
+		t.Fatalf("%d %s %s", rc, &out, &stderr)
+	}
+	if !strings.Contains(stderr.String(), "zsh gwt function") || !strings.Contains(stderr.String(), "zshreload") {
+		t.Fatalf("stderr: %s", &stderr)
+	}
+	if _, err := os.Stat(filepath.Join(home, "dev", ".worktrees", "project", "feat/cd")); !os.IsNotExist(err) {
+		t.Fatal("worktree created despite refused --cd")
 	}
 }

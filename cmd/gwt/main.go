@@ -28,7 +28,8 @@ const help = `Usage: gwt [create] <branch> [base] [options]
 Create and remove Git worktrees; inspect branch resolution and configuration.
 Creation places branches in <worktree_root>/<main-checkout>/<branch> and prints
 the absolute path, or one JSON object with --json. Diagnostics go to stderr.
-The binary never changes your shell's directory or installs dependencies.
+The binary never changes your shell's directory or installs dependencies; the
+zsh gwt function from dotfiles wraps it and performs the cd for --cd.
 
 An existing local branch is checked out as-is; a unique remote branch becomes
 a tracking branch. Otherwise create a branch from base (config default: HEAD).
@@ -43,6 +44,7 @@ Options (create unless marked otherwise; before or after arguments):
   --no-fetch            create/resolve: use locally cached refs
   --fetch               list/merged/trunk: refresh a stale trunk first
   --into REV            merged: judge against REV instead of the trunk (never fetches)
+  --cd                  Enter the new worktree in the calling shell (zsh function only)
   --json                All commands: print one JSON object
   -h, --help            All commands: show help
 
@@ -92,7 +94,7 @@ Invalid arguments print diagnostics on stderr, including with --json.
 type options struct {
 	command, branch, base                      string
 	yes, forceNew, noCopy, noFetch, json, help bool
-	force                                      bool
+	force, cd                                  bool
 	fetch                                      bool
 	into                                       string   // merged
 	branches                                   []string // merged
@@ -153,6 +155,9 @@ func parse(args []string) (options, error) {
 			case "--fetch":
 				o.fetch = true
 				continue
+			case "--cd":
+				o.cd = true
+				continue
 			}
 			if strings.HasPrefix(arg, "-") {
 				return o, fmt.Errorf("unknown option: %s", arg)
@@ -172,8 +177,13 @@ func parse(args []string) (options, error) {
 	if o.into != "" && (o.command != "merged" || o.fetch) {
 		return o, fmt.Errorf("--into is only for merged, without --fetch: the caller owns that revision's freshness")
 	}
-	if o.command != "create" && (o.forceNew || o.noCopy || o.yes || (o.noFetch && o.command != "resolve")) {
+	if o.command != "create" && (o.forceNew || o.noCopy || o.yes || o.cd || (o.noFetch && o.command != "resolve")) {
 		return o, fmt.Errorf("unsupported option for %s", o.command)
+	}
+	// Only the parent shell can change its own directory. The zsh gwt function
+	// strips --cd before calling the binary, so seeing it here means no wrapper.
+	if o.cd {
+		return o, errors.New(`--cd needs the zsh gwt function from dotfiles; the binary cannot change your shell's directory. Run zshreload, or use: cd "$(gwt create <branch>)"`)
 	}
 	switch o.command {
 	case "config":
