@@ -347,7 +347,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 			return false
 		}
 	}
-	result, err := r.Create(ctx, worktree.Options{
+	result, err := r.Create(ctx, worktree.CreateOptions{
 		Branch: o.branch, Base: o.base, ForceNew: o.forceNew, NoCopy: o.noCopy,
 		NoFetch: o.noFetch, NonInteractive: o.yes, Confirm: confirm,
 	})

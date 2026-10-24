@@ -2,80 +2,34 @@ package worktree
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/qiushiyan/gwt/internal/config"
 )
 
-var ErrNotRepository = errors.New("not inside a Git working tree")
-
-type Repo struct {
-	dir, main, root, common string
-	stderr                  io.Writer
-	config                  config.Config
-}
-
-func Open(ctx context.Context, dir, home string, stderr io.Writer) (*Repo, error) {
-	inside, err := git(ctx, dir, "rev-parse", "--is-inside-work-tree")
-	if err != nil || inside != "true" {
-		return nil, fmt.Errorf("%w: %s", ErrNotRepository, dir)
-	}
-	list, err := git(ctx, dir, "worktree", "list", "--porcelain", "-z")
-	if err != nil {
-		return nil, err
-	}
-	first, _, _ := strings.Cut(list, "\x00")
-	if !strings.HasPrefix(first, "worktree ") {
-		return nil, fmt.Errorf("cannot determine main worktree")
-	}
-	main := strings.TrimPrefix(first, "worktree ")
-	common, err := git(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := config.Load(home, common)
-	if err != nil {
-		return nil, err
-	}
-	return &Repo{dir: dir, main: main, common: common, root: filepath.Join(cfg.WorktreeRoot, filepath.Base(main)), stderr: stderr, config: cfg}, nil
-}
-
-type Verdict struct {
+// Resolution is how creation would obtain a branch: a local branch, the one
+// remote branch of that name, several (ambiguous), or none (absent). It is
+// not a merge verdict, which verdict.go owns.
+type Resolution struct {
 	Kind string   `json:"kind"`
 	Refs []string `json:"refs,omitempty"`
 }
 
-func (v Verdict) String() string {
+func (v Resolution) String() string {
 	return strings.Join(append([]string{v.Kind}, v.Refs...), " ")
 }
 
-func (r *Repo) validate(ctx context.Context, branch string) error {
-	// Full-ref validation rejects path traversal and @{-1} expansion before any
-	// fetch or mkdir. --branch adds Git's special HEAD and leading-dash rules.
-	if _, err := git(ctx, r.dir, "check-ref-format", "refs/heads/"+branch); err != nil {
-		return fmt.Errorf("invalid branch name: %q", branch)
-	}
-	if _, err := git(ctx, r.dir, "check-ref-format", "--branch", branch); err != nil {
-		return fmt.Errorf("invalid branch name: %q", branch)
-	}
-	return nil
-}
-
-func (r *Repo) resolve(ctx context.Context, branch string) (Verdict, error) {
+func (r *Repo) resolve(ctx context.Context, branch string) (Resolution, error) {
 	// Query failures must not masquerade as an absent branch.
 	refs, err := git(ctx, r.dir, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
 	if err != nil {
-		return Verdict{}, err
+		return Resolution{}, err
 	}
-	v := Verdict{Kind: "absent"}
+	v := Resolution{Kind: "absent"}
 	for ref := range strings.SplitSeq(refs, "\n") {
 		if ref == "refs/heads/"+branch {
-			return Verdict{Kind: "local"}, nil
+			return Resolution{Kind: "local"}, nil
 		}
 		if !strings.HasPrefix(ref, "refs/remotes/") {
 			continue
@@ -95,8 +49,6 @@ func (r *Repo) resolve(ctx context.Context, branch string) (Verdict, error) {
 	return v, nil
 }
 
-func (r *Repo) Configuration() config.Config { return r.config }
-
 // Path computes placement without fetching, creating directories, or requiring
 // a free slot. Callers use it to diagnose existing worktrees before creation.
 func (r *Repo) Path(ctx context.Context, branch string) (string, error) {
@@ -109,9 +61,9 @@ func (r *Repo) Path(ctx context.Context, branch string) (string, error) {
 	return filepath.Join(r.root, branch), nil
 }
 
-func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict, error) {
+func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Resolution, error) {
 	if err := r.validate(ctx, branch); err != nil {
-		return Verdict{}, err
+		return Resolution{}, err
 	}
 	v, err := r.resolve(ctx, branch)
 	if err != nil || v.Kind != "absent" || !fresh {
@@ -122,7 +74,7 @@ func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict,
 	}
 	remotes, err := git(ctx, r.dir, "remote")
 	if err != nil {
-		return Verdict{}, err
+		return Resolution{}, err
 	}
 	if remotes == "" {
 		return v, nil
@@ -139,7 +91,7 @@ func (r *Repo) Resolve(ctx context.Context, branch string, fresh bool) (Verdict,
 	return r.resolve(ctx, branch)
 }
 
-type Options struct {
+type CreateOptions struct {
 	Branch, Base                              string
 	ForceNew, NoCopy, NoFetch, NonInteractive bool
 	Confirm                                   func(branch, base string) bool
@@ -155,7 +107,7 @@ type Result struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-func (r *Repo) Create(ctx context.Context, o Options) (Result, error) {
+func (r *Repo) Create(ctx context.Context, o CreateOptions) (Result, error) {
 	if err := r.validate(ctx, o.Branch); err != nil {
 		return Result{}, err
 	}
@@ -166,7 +118,7 @@ func (r *Repo) Create(ctx context.Context, o Options) (Result, error) {
 	if err := freeSlot(dest); err != nil {
 		return Result{}, err
 	}
-	v := Verdict{Kind: "absent"}
+	v := Resolution{Kind: "absent"}
 	var err error
 	if !o.ForceNew {
 		v, err = r.Resolve(ctx, o.Branch, !o.NoFetch)
