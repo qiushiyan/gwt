@@ -18,7 +18,7 @@ gwt --cd feat/search            # same, then cd into it (zsh function, default o
 gwt feat/search --no-clipboard  # leave the clipboard alone
 gwt create -n feat/agent-work    # unattended; stdout is only the path
 gwt create -n feat/agent-json --json
-gwt --help
+gwt --help                      # the commands; gwt <command> --help for one
 ```
 
 The binary does not change the caller's directory: no child process can. The
@@ -36,7 +36,8 @@ the clipboard alone; `--no-clipboard` skips the copy at a terminal. A failed
 copy only warns: the worktree and its printed path stand.
 
 Command names are reserved in the first position. To create a branch named
-`remove`, for example, use `gwt create remove`.
+`remove`, for example, use `gwt create remove`. Each command's `--help` is its
+reference: what it does, its flags, its text output, and every key of its JSON.
 
 ## Configuration
 
@@ -124,10 +125,11 @@ gwt trunk --fetch               # the trunk, refreshed when older than fetch.max
 else the main checkout's branch. Full ref names are tried, so a local branch
 called `origin/main` cannot shadow the remote. The trunk is not the creation
 `base`, which answers where a new branch forks from and is often the caller's
-HEAD. One verdict serves the tmux popup's tags and reap, removal, `brief`'s
-closeout, and the clean-worktrees skill's audit, so they cannot disagree about
-a branch. The audit verifies its own base against the remote's advertised
-heads and passes it as `--into`; everything else measures against the trunk.
+HEAD. One verdict, `internal/worktree/verdict.go`, serves the tmux popup's tags
+and reap, removal, `brief`'s closeout, drive's landing check, and the
+clean-worktrees skill's audit, so they cannot disagree about a branch. The
+audit verifies its own base against the remote's advertised heads and passes it
+as `--into`; everything else measures against the trunk.
 
 A branch is merged by ancestry, by a squash commit matching its combined patch,
 or by rebased commits matching each of its patches. Patch matches also require
@@ -145,24 +147,17 @@ process per CPU at most. Status probes pass `--no-optional-locks` so they never
 contend with an agent working in the same checkout.
 
 `list`, `merged`, and `trunk` read cached refs. `--fetch` first refreshes a
-remote trunk that no fetch has touched within `fetch.max_age`, bounded by
-`fetch.timeout`; a failed fetch warns, grades against cached refs, and sets
-`trunk.fetch_error`. JSON shapes:
+remote trunk whose last fetch, the main checkout's `FETCH_HEAD`, is older than
+`fetch.max_age`, bounded by `fetch.timeout`; a failed fetch warns, grades against
+cached refs, and sets `trunk.fetch_error`.
 
-```json
-{"trunk":{"name":"origin/develop","commit":"…","remote":"origin","stale":false},
- "worktrees":[{"path":"…","branch":"feat/x","head":"…","main":false,"current":false,
-   "locked":false,"prunable":false,"dirty":true,"merged":false,"removable":false}]}
-{"trunk":{…},"branches":[{"branch":"feat/x","commit":"…","merged":true}]}
-```
-
-`merged` is `null` for a detached checkout, a missing branch, an unreadable
-status, or a failed check (then `error` says why). An unreadable status also
-reads as `dirty`, so unknown state is never clean. `removable` says whether
-`gwt remove <path>` without flags would take the worktree (§ Removal). `merged` exits 1 if any named branch could not be judged.
-Its arguments are local branches first; an argument that names none but is a
-full commit id is judged as that commit. `--into <rev>` measures against that
-revision instead of the trunk, reported in the `trunk` field, and never
+An unreadable status reads as dirty and leaves the verdict unknown, so unknown
+state is never clean. `list`'s `removable` applies removal's rule (§ Removal) to
+the cached verdict. `merged` takes local branches first; an argument that names
+none but is a full commit id is judged as that commit, which is how a caller
+holding a detached HEAD asks. An unmerged verdict is a result: `merged` exits 1
+only when a target could not be judged, and still prints every verdict.
+`--into <rev>` measures against that revision instead of the trunk and never
 fetches: the caller owns its freshness.
 
 ## Removal
@@ -192,9 +187,9 @@ trunk by the verdict above; removal refreshes a stale remote trunk first, so a
 PR squash-merged on GitHub minutes ago counts. `--keep-branch` removes only the
 checkout. `--expect-head` refuses unless the single target is still at that
 commit, which closes the race between deciding and removing (brief's closeout
-and the clean-worktrees runner pass the commit they judged). The verdict can fetch, so after it the commit and
-the dirt are read again, just before anything is kept or moved; a target that
-changed meanwhile is refused. The branch is deleted only from the commit that
+and the clean-worktrees runner pass the commit they judged). The verdict can
+fetch, so after it the commit and the dirt are read again, just before anything
+is kept or moved; a target that changed meanwhile is refused. The branch is deleted only from the commit that
 was judged (`git update-ref -d` with the expected value). A writer still
 working in the checkout can race that last read, so callers stop their own
 first (the popup kills the checkout's windows before calling gwt).
@@ -224,20 +219,15 @@ returns at once and a closing tmux popup's hangup cannot stop the deletion.
 Ignored files, including seeded prerequisites, go with the checkout; the
 clean-worktrees skill archives them first when they matter.
 
-Exit 0 when every target succeeds, else 1. `--json` prints one object per
-target, so an agent can tell refusal from partial completion:
-
-```json
-{"ok":true,"target":"feat/x","path":"/abs/checkout","branch":"feat/x","worktree_removed":true,"branch_deleted":true,"recovery_ref":"refs/wt-trash/1790000000.4242/001-feat-x"}
-```
-
-Failures carry `error`. `worktree_removed` is true once the checkout is in the
-trash, even when unregistering it then fails (`git worktree prune` drops the
-registration), so a caller never treats a gone checkout as still there. If
-branch deletion fails after the checkout went, `worktree_removed` is true and
-`branch_deleted` false; the branch remains for manual cleanup. A failed target
-does not stop the batch. gwt does not touch tmux windows or processes working in a
-checkout; its callers do.
+Every target's result is printed, then the command exits 1 if any failed. With
+`--json` that is one object per line per target, so an agent can tell refusal
+from partial completion, even when the repository cannot be opened.
+`worktree_removed` is true once the checkout is in the trash, even when
+unregistering it then fails (`git worktree prune` drops the registration), so a
+caller never treats a gone checkout as still there; a branch deletion that fails
+after it leaves the branch for inspection. A failed target does not stop the
+batch. gwt does not touch tmux windows or processes working in a checkout; its
+callers do.
 
 ## Integration boundaries
 
@@ -261,27 +251,59 @@ checkout; its callers do.
   `--force --expect-head <PR head>` for a squash merge, and
   `<path> --keep-branch --expect-head <local tip>` for the checkout of a
   branch it holds.
+- drive asks `gwt merged <branches…> [<commit>] --json` whether a session's
+  work landed, reading the verdicts even when gwt exits 1 for a target it could
+  not judge.
+- rex-worktree and the `/wt` mod create through `gwt create --non-interactive`
+  and take the path from the last line of its output; rex-worktree lists
+  through `gwt list --json`.
 - The `enter-worktree` skill calls the installed binary and enters its returned
   path.
 
-Creation stdout is one path or one JSON object; resolution prints one verdict
-or JSON object. Diagnostics and prompts use stderr. Exit codes are 0 for success, 1 for operational failure or declined
-confirmation, and 2 for command-line usage errors. `resolve` may refresh refs;
-pass `--no-fetch` for a read-only probe.
+Creation prints one path or one JSON object, and `resolve` one line or JSON
+object. Diagnostics and prompts use stderr; a failure reads
+`gwt: error: <reason>`, and a usage error adds the command's synopsis. Exit codes
+are 0 for success, 1 for an operational failure or a declined confirmation, and
+2 for invalid arguments, refused before anything runs. `resolve` may refresh
+refs; pass `--no-fetch` for a read-only probe. `TestContracts` pins these bytes
+for the argv each caller sends (§ Development).
 
 ## Development
 
 Go fits the existing personal CLI toolchain and provides the subprocess, timeout,
 filesystem, and testing support this tool needs. Rust's ownership model would
-add little to a short-lived CLI whose work is mostly performed by Git. The code
-uses a TOML decoder and x/term's terminal check alongside the standard
-library and invokes Git directly, avoiding a second Git implementation or a CLI
-framework.
+add little to a short-lived CLI whose work is mostly performed by Git. gwt
+invokes Git directly rather than carrying a second Git implementation; beyond the
+standard library it uses clikit and Kong for the command line, a TOML decoder,
+and x/term's terminal check.
 
-`cmd/gwt` owns arguments, confirmation, output, and the clipboard copy.
-`internal/worktree` owns resolution, creation, seeding, listing, merge verdicts,
-and removal; `internal/config` owns layered configuration and validation.
-`make check` runs race-enabled tests, vet, and formatting checks. Tests use
-temporary homes and real repositories/local remotes; a hanging remote helper
-exercises the fetch deadline. Installation builds beside the destination and
-renames it into place so concurrent callers see a complete executable.
+`cmd/gwt` owns arguments, confirmation, output, and the clipboard copy: each
+command is a Kong struct whose `Run` makes one call into `internal/worktree`.
+How help renders, how an argv error reads, and which errors are usage errors
+belong to clikit (`~/dev/clikit`), shared by the Go CLIs in `~/dev`: a change
+there is a clikit release and a `go.mod` bump, reviewed through the golden help
+pages. One parsing rule is gwt's own: the first word picks the command
+(`dispatch` in `cmd/gwt/main.go`). Kong alone lets a flag of the default command
+carry the parse on to a later command name, which would turn `gwt -n remove x`
+from creating the branch `remove` into removing `x`.
+
+`internal/worktree` owns resolution, creation, seeding, listing, and removal,
+with the merge verdict in `verdict.go` alone; `internal/config` owns layered
+configuration and validation.
+
+`make check` runs vet, `go fix -diff` (Go 1.27's modernizers must leave nothing
+to rewrite), race-enabled tests, and formatting. What agents and programs read is
+pinned by its own suite:
+
+- **Caller output:** `TestContracts` replays each caller's argv over a fixed
+  world and compares stdout, stderr, and the exit code byte for byte with
+  `cmd/gwt/testdata/contract`. `GWT_CONTRACT_UPDATE=1` rewrites the files;
+  `GWT_CONTRACT_BIN=<build>` replays them against a built binary.
+- **Help pages:** `TestHelpPages` pins every page; `make golden` rewrites them.
+- **JSON documentation:** `TestTheJSONIsDescribed` fails when a key a command's
+  `--json` can print is missing from its help page.
+
+Tests use temporary homes and real repositories with local remotes; a hanging
+remote helper exercises the fetch deadline. Installation builds beside the
+destination and renames it into place so concurrent callers see a complete
+executable.
