@@ -23,8 +23,8 @@ Flags:
 Arguments and flags of create, the default command:
   <branch>                 The branch to check out; created when no local or remote branch has the
                            name.
-  <base>                   Where a new branch forks from; unused when the branch exists. Default:
-                           the configured base (optional).
+  <base>                   Where a new branch forks from; unused when a local branch or one remote
+                           branch has the name. Default: the configured base (optional).
   -n, --non-interactive    Fork a new branch from the configured base without asking, even when that
                            base is HEAD. Agents and scripts pass this.
       --new                Create a new branch even when a remote branch has the name; an existing
@@ -53,8 +53,8 @@ Commands:
 
 Exit codes:
   0    success
-  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
-       after printing every target's result
+  1    failed, or a creation was declined; also remove when any target failed, and merged when any
+       target could not be judged, after printing every target's result
   2    invalid arguments; nothing was run
 
 Run "gwt <command> --help" for a command's details.

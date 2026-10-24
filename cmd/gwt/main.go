@@ -30,7 +30,7 @@ var app = clikit.App{
 		kong.BindToProvider(watching),
 	},
 	ExitCodes: map[int]string{
-		1: "failed, or a creation was declined; remove and merged also exit 1 when any target failed, after printing every target's result",
+		1: "failed, or a creation was declined; also remove when any target failed, and merged when any target could not be judged, after printing every target's result",
 	},
 }
 

@@ -17,7 +17,7 @@ type RemoveCmd struct {
 	Force        bool `help:"Delete a branch that is not merged into the trunk; its tip is kept as a recovery ref."`
 	DiscardDirty bool `help:"Remove a checkout that holds changes, after snapshotting them to a recovery ref."`
 	KeepBranch   bool `help:"Remove only the checkout and keep its branch, so no merge verdict is needed."`
-	ExpectHead   rev  `placeholder:"COMMIT" help:"Refuse unless the one target is still at COMMIT. Pass the commit you judged, so work committed since cannot be lost."`
+	ExpectHead   rev  `placeholder:"COMMIT" help:"Refuse unless the one target is still at COMMIT (an id or any revision). Pass the commit you judged, so work committed since cannot be lost."`
 	JSON         bool `help:"Print one JSON object per target, one per line, instead of text."`
 }
 
@@ -28,31 +28,35 @@ does not stop the others.
 Always refused: the main checkout, the one you are in, a locked one, and one that
 holds another worktree. Refused unless --discard-dirty: uncommitted, untracked or
 index-hidden changes, or a status that cannot be read. Refused unless --force or
---keep-branch: a branch not merged into the trunk, judged after fetching a remote
-trunk that no fetch has reached within fetch.max_age, so a pull request merged
-minutes ago counts. gwt list's removable applies the same rules. A target whose
-commit or changes moved while gwt checked it is refused; stop any process still
-working in a checkout before removing it.
+--keep-branch: a branch not merged into the trunk, judged after fetching a stale
+remote trunk as described below. gwt list's removable applies the same rules to
+the cached refs. A target whose commit or changes moved while gwt checked it is
+refused; stop any process still working in a checkout before removing it.
 
-Nothing is discarded without a recovery ref under refs/wt-trash/<batch>/: the
-snapshot --discard-dirty takes (shaped like a stash: first parent HEAD, second a
-commit of the index, ignored files left out), the tip --force deletes, or a
-removed detached checkout's HEAD. Restore one with git branch <name> <ref>. Refs
-older than recovery.keep expire on each removal. Ignored files go with the
-checkout, which moves to <worktree_root>/.trash and is deleted in the background.
+Nothing is discarded without a recovery ref, refs/wt-trash/<batch>/<n>-<name>
+(git for-each-ref refs/wt-trash lists them): the tip --force deletes, a removed
+detached checkout's HEAD, or the snapshot --discard-dirty takes. A snapshot is a
+commit on top of HEAD whose tree is the checkout's whole working state,
+untracked files included and ignored ones not, with a commit of the index as
+its second parent; since its first parent is HEAD it keeps a force-deleted tip
+too. git branch <name> <ref> restores any of them as a branch. Refs older than
+recovery.keep expire on each removal. Ignored files go with the checkout, which
+moves to <worktree_root>/.trash and is deleted in the background.
 
 Text: what was removed and any ref kept, on stdout; each failed target on stderr
 as "gwt: error: <target>: <reason>". The command exits 1 when any target failed.`
 }
 
 func (RemoveCmd) HelpSections() []clikit.Section {
-	return []clikit.Section{{Title: "JSON", Body: `One object per line, one per target, in order, success or not; a failure is
-also reported on stderr:
+	return []clikit.Section{{Title: "JSON", Body: `One object per line, one per target, in order, success or not, even when the
+repository cannot be opened; a failure is also reported on stderr. An argument
+error (exit 2) prints nothing.
   ok                true when everything asked for this target was done
   target            the target as given
   path              the checkout; absent for a branch without one
   branch            the branch; "" for a detached checkout
-  worktree_removed  true once the checkout is gone, even when a later step failed
+  worktree_removed  true once the checkout is gone, even when a later step failed;
+                    false for a branch without one
   branch_deleted    true when the branch was deleted
   recovery_ref      the ref keeping what was discarded; absent when nothing was
   error             why the target failed; absent on success

@@ -16,7 +16,7 @@ import (
 
 type CreateCmd struct {
 	Branch string `arg:"" help:"The branch to check out; created when no local or remote branch has the name."`
-	Base   string `arg:"" optional:"" help:"Where a new branch forks from; unused when the branch exists. Default: the configured base."`
+	Base   string `arg:"" optional:"" help:"Where a new branch forks from; unused when a local branch or one remote branch has the name. Default: the configured base."`
 
 	NonInteractive bool `short:"n" help:"Fork a new branch from the configured base without asking, even when that base is HEAD. Agents and scripts pass this."`
 	New            bool `help:"Create a new branch even when a remote branch has the name; an existing local branch is still checked out as it is."`
@@ -40,8 +40,8 @@ Before treating a name as absent, gwt fetches every remote when no fetch has
 reached the repository within fetch.max_age, bounded by fetch.timeout. A failed
 fetch warns and uses the cached refs.
 
-The slot must be absent or an empty directory; anything else is refused, and
-nothing is deleted. Ignored files in the main checkout whose names match
+The slot must be absent or an empty directory; anything else, a checkout an
+earlier create made included, is refused, and nothing is deleted. Ignored files in the main checkout whose names match
 copy_globs (gwt config show lists them) are copied in. A failed copy is only a
 warning: the checkout and its path stand, so do not retry the creation.
 
@@ -51,18 +51,19 @@ pbcopy). A caller that captures stderr, as agents do, leaves the clipboard alone
 
 func (CreateCmd) HelpSections() []clikit.Section {
 	return []clikit.Section{
-		{Title: "JSON", Body: `One object:
+		{Title: "JSON", Body: `One object; on failure stdout is empty and stderr says why:
   path      the checkout's absolute path
   branch    the branch checked out
   action    created (a new branch), local (an existing local branch), or remote
             (a new branch tracking the remote one)
-  base      what a created branch forked from; absent otherwise
+  base      what a created branch forked from, as named (HEAD reads as its
+            branch, such as main); absent otherwise
   upstream  the remote branch tracked, such as origin/x; absent unless remote
   copied    how many ignored files were copied in
-  warnings  why files could not be copied; absent when none failed`},
+  warnings  one string per file that could not be copied; absent when none failed`},
 		{Title: "Examples", Body: `gwt fix/login main               # fork from main, no question asked
 gwt feat/search                  # fork from HEAD after confirming at a terminal
-gwt create -n feat/agent-work    # unattended: stdout is only the path
+gwt create -n feat/agent-work    # no question asked: for scripts and agents
 gwt create -n feat/x main --json`},
 	}
 }
@@ -149,7 +150,7 @@ func (c *ResolveCmd) Run(k *kong.Context, ctx context.Context, r *worktree.Repo)
 }
 
 type PathCmd struct {
-	Branch string `arg:"" optional:"" help:"The branch whose path to print; without it, the root this repository's worktrees go under."`
+	Branch string `arg:"" optional:"" help:"The branch whose path to print; without it, <worktree_root>/<name of the main checkout>, which this repository's worktrees go under."`
 	JSON   bool   `help:"Print one JSON object instead of the path."`
 }
 

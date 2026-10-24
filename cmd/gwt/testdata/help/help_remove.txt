@@ -8,18 +8,20 @@ does not stop the others.
 Always refused: the main checkout, the one you are in, a locked one, and one that
 holds another worktree. Refused unless --discard-dirty: uncommitted, untracked or
 index-hidden changes, or a status that cannot be read. Refused unless --force or
---keep-branch: a branch not merged into the trunk, judged after fetching a remote
-trunk that no fetch has reached within fetch.max_age, so a pull request merged
-minutes ago counts. gwt list's removable applies the same rules. A target whose
-commit or changes moved while gwt checked it is refused; stop any process still
-working in a checkout before removing it.
+--keep-branch: a branch not merged into the trunk, judged after fetching a stale
+remote trunk as described below. gwt list's removable applies the same rules to
+the cached refs. A target whose commit or changes moved while gwt checked it is
+refused; stop any process still working in a checkout before removing it.
 
-Nothing is discarded without a recovery ref under refs/wt-trash/<batch>/: the
-snapshot --discard-dirty takes (shaped like a stash: first parent HEAD, second a
-commit of the index, ignored files left out), the tip --force deletes, or a
-removed detached checkout's HEAD. Restore one with git branch <name> <ref>. Refs
-older than recovery.keep expire on each removal. Ignored files go with the
-checkout, which moves to <worktree_root>/.trash and is deleted in the background.
+Nothing is discarded without a recovery ref, refs/wt-trash/<batch>/<n>-<name>
+(git for-each-ref refs/wt-trash lists them): the tip --force deletes, a removed
+detached checkout's HEAD, or the snapshot --discard-dirty takes. A snapshot is a
+commit on top of HEAD whose tree is the checkout's whole working state,
+untracked files included and ignored ones not, with a commit of the index as
+its second parent; since its first parent is HEAD it keeps a force-deleted tip
+too. git branch <name> <ref> restores any of them as a branch. Refs older than
+recovery.keep expire on each removal. Ignored files go with the checkout, which
+moves to <worktree_root>/.trash and is deleted in the background.
 
 Text: what was removed and any ref kept, on stdout; each failed target on stderr
 as "gwt: error: <target>: <reason>". The command exits 1 when any target failed.
@@ -36,21 +38,24 @@ Flags:
                               recovery ref.
       --keep-branch           Remove only the checkout and keep its branch, so no merge verdict is
                               needed.
-      --expect-head=COMMIT    Refuse unless the one target is still at COMMIT. Pass the commit you
-                              judged, so work committed since cannot be lost.
+      --expect-head=COMMIT    Refuse unless the one target is still at COMMIT (an id or any
+                              revision). Pass the commit you judged, so work committed since cannot
+                              be lost.
       --json                  Print one JSON object per target, one per line, instead of text.
 
 Inherited flags:
   -h, --help                  Show context-sensitive help.
 
 JSON:
-  One object per line, one per target, in order, success or not; a failure is
-  also reported on stderr:
+  One object per line, one per target, in order, success or not, even when the
+  repository cannot be opened; a failure is also reported on stderr. An argument
+  error (exit 2) prints nothing.
     ok                true when everything asked for this target was done
     target            the target as given
     path              the checkout; absent for a branch without one
     branch            the branch; "" for a detached checkout
-    worktree_removed  true once the checkout is gone, even when a later step failed
+    worktree_removed  true once the checkout is gone, even when a later step failed;
+                      false for a branch without one
     branch_deleted    true when the branch was deleted
     recovery_ref      the ref keeping what was discarded; absent when nothing was
     error             why the target failed; absent on success
@@ -67,11 +72,17 @@ The trunk and merge verdicts:
   carry each of its commits' changes (a rebase). A change match also needs a clean
   merge that leaves the trunk's contents exactly as they are. A branch with merge
   commits of its own, or whose lines the trunk edited again later, may stay
-  unconfirmed. A branch with no commits of its own counts as merged: it holds
-  nothing to lose.
+  unconfirmed, which reads as unmerged. A branch with no commits of its own
+  counts as merged: it holds nothing to lose.
+
+  Verdicts read cached remote refs. A command that fetches first (--fetch, and
+  remove) does so only when the last fetch gwt can see, the main checkout's
+  FETCH_HEAD, is older than fetch.max_age, bounded by fetch.timeout; a failed fetch
+  warns on stderr and the verdicts use the cached refs. To be sure a merge made
+  moments ago counts, run git fetch yourself first.
 
 Exit codes:
   0    success
-  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
-       after printing every target's result
+  1    failed, or a creation was declined; also remove when any target failed, and merged when any
+       target could not be judged, after printing every target's result
   2    invalid arguments; nothing was run

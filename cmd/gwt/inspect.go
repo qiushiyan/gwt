@@ -23,8 +23,14 @@ trunk commit carries its combined change (a squash merge), or when trunk commits
 carry each of its commits' changes (a rebase). A change match also needs a clean
 merge that leaves the trunk's contents exactly as they are. A branch with merge
 commits of its own, or whose lines the trunk edited again later, may stay
-unconfirmed. A branch with no commits of its own counts as merged: it holds
-nothing to lose.`}
+unconfirmed, which reads as unmerged. A branch with no commits of its own
+counts as merged: it holds nothing to lose.
+
+Verdicts read cached remote refs. A command that fetches first (--fetch, and
+remove) does so only when the last fetch gwt can see, the main checkout's
+FETCH_HEAD, is older than fetch.max_age, bounded by fetch.timeout; a failed fetch
+warns on stderr and the verdicts use the cached refs. To be sure a merge made
+moments ago counts, run git fetch yourself first.`}
 
 type ListCmd struct {
 	Fetch bool `help:"First fetch a remote trunk that no fetch has reached within fetch.max_age, so verdicts see merges made on the remote since."`
@@ -39,8 +45,7 @@ then its branch, path, and tags (main, merged, locked, prunable). A worktree
 whose status cannot be read counts as having changes, and why is reported on
 stderr as "gwt: warning: <path>: <reason>"; the listing still exits 0.
 
-Without --fetch it reads cached remote refs and contacts no remote. A failed
-fetch warns on stderr and the verdicts use the cached refs.`
+Without --fetch it contacts no remote.`
 }
 
 func (ListCmd) HelpSections() []clikit.Section {
@@ -56,7 +61,8 @@ func (ListCmd) HelpSections() []clikit.Section {
              could not be read
   merged     whether its branch is merged into the trunk; null when detached,
              when its status could not be read, or when the check failed
-  removable  whether gwt remove <path> without flags would remove it
+  removable  whether gwt remove <path> without flags would remove it, judged on
+             the cached refs (remove itself may fetch first)
   error      why its status or verdict could not be read; absent otherwise`}, trunkSection}
 }
 
@@ -107,17 +113,20 @@ type MergedCmd struct {
 }
 
 func (MergedCmd) Help() string {
-	return `Prints whether each target's work is in the trunk: one line per target,
-"merged<TAB><target>" or "unmerged<TAB><target>", in order. A full commit id,
-such as a detached checkout's HEAD, is judged as that commit. A target that
-cannot be judged is reported on stderr as "gwt: error: <target>: <reason>" (in
-JSON, by its error field), the rest are still judged, and the command exits 1.
+	return `Prints whether each target's work is in the trunk, one line per judged target in
+order: "merged<TAB><target>", or "unmerged<TAB><target>" when the trunk is not
+confirmed to hold it. A full commit id, such as a detached checkout's HEAD, is
+judged as that commit. Verdicts, unmerged ones included, exit 0. A target that
+cannot be judged, such as a branch that does not exist, gets no line: it is
+reported on stderr as "gwt: error: <target>: <reason>" (in JSON, by its error
+field), the rest are still judged, and the command exits 1.
 
-Without --fetch it reads cached remote refs and contacts no remote.`
+Without --fetch it contacts no remote. --into's revision must exist locally.`
 }
 
 func (MergedCmd) HelpSections() []clikit.Section {
-	return []clikit.Section{{Title: "JSON", Body: `One object, printed even when a target fails:
+	return []clikit.Section{{Title: "JSON", Body: `One object, printed even when a target cannot be judged; nothing when the trunk
+or the --into revision cannot be resolved (exit 1):
   trunk     what the verdicts were measured against, as gwt trunk --json prints
             it; with --into, its name and commit are that revision
   branches  one object per target, in order:

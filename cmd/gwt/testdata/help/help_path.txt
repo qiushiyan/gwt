@@ -8,8 +8,8 @@ configuration, so it can differ from where an existing checkout of the branch
 lives; gwt list shows those.
 
 Arguments:
-  <branch>      The branch whose path to print; without it, the root this repository's worktrees go
-                under (optional).
+  <branch>      The branch whose path to print; without it, <worktree_root>/<name of the main
+                checkout>, which this repository's worktrees go under (optional).
 
 Flags:
       --json    Print one JSON object instead of the path.
@@ -22,6 +22,6 @@ JSON:
 
 Exit codes:
   0    success
-  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
-       after printing every target's result
+  1    failed, or a creation was declined; also remove when any target failed, and merged when any
+       target could not be judged, after printing every target's result
   2    invalid arguments; nothing was run

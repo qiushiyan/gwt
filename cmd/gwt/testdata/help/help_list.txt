@@ -9,8 +9,7 @@ then its branch, path, and tags (main, merged, locked, prunable). A worktree
 whose status cannot be read counts as having changes, and why is reported on
 stderr as "gwt: warning: <path>: <reason>"; the listing still exits 0.
 
-Without --fetch it reads cached remote refs and contacts no remote. A failed
-fetch warns on stderr and the verdicts use the cached refs.
+Without --fetch it contacts no remote.
 
 Flags:
       --fetch    First fetch a remote trunk that no fetch has reached within fetch.max_age, so
@@ -33,7 +32,8 @@ JSON:
                could not be read
     merged     whether its branch is merged into the trunk; null when detached,
                when its status could not be read, or when the check failed
-    removable  whether gwt remove <path> without flags would remove it
+    removable  whether gwt remove <path> without flags would remove it, judged on
+               the cached refs (remove itself may fetch first)
     error      why its status or verdict could not be read; absent otherwise
 
 The trunk and merge verdicts:
@@ -46,11 +46,17 @@ The trunk and merge verdicts:
   carry each of its commits' changes (a rebase). A change match also needs a clean
   merge that leaves the trunk's contents exactly as they are. A branch with merge
   commits of its own, or whose lines the trunk edited again later, may stay
-  unconfirmed. A branch with no commits of its own counts as merged: it holds
-  nothing to lose.
+  unconfirmed, which reads as unmerged. A branch with no commits of its own
+  counts as merged: it holds nothing to lose.
+
+  Verdicts read cached remote refs. A command that fetches first (--fetch, and
+  remove) does so only when the last fetch gwt can see, the main checkout's
+  FETCH_HEAD, is older than fetch.max_age, bounded by fetch.timeout; a failed fetch
+  warns on stderr and the verdicts use the cached refs. To be sure a merge made
+  moments ago counts, run git fetch yourself first.
 
 Exit codes:
   0    success
-  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
-       after printing every target's result
+  1    failed, or a creation was declined; also remove when any target failed, and merged when any
+       target could not be judged, after printing every target's result
   2    invalid arguments; nothing was run
