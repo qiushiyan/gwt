@@ -5,5 +5,5 @@ trunk origin/main 9f9a7253a551
  * broken     $HOME/dev/.worktrees/project/broken     
    feat/bare  $HOME/dev/.worktrees/project/feat/bare  merged locked
 --- stderr
-gwt: $HOME/dev/.worktrees/project/broken: git status: exit status 128: fatal: error opening '$HOME/dev/.worktrees/project/broken/.git': Permission denied
+gwt: warning: $HOME/dev/.worktrees/project/broken: git status: exit status 128: fatal: error opening '$HOME/dev/.worktrees/project/broken/.git': Permission denied
 --- exit 0

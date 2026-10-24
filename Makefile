@@ -1,7 +1,7 @@
 PREFIX ?= $(HOME)/.local
 BIN := $(PREFIX)/bin/gwt
 
-.PHONY: build install check test
+.PHONY: build install test vet fix check golden
 build:
 	go build -o gwt ./cmd/gwt
 
@@ -13,6 +13,17 @@ install:
 test:
 	go test -race ./...
 
-check: test
+vet:
 	go vet ./...
+
+# Go 1.27 modernizers must leave nothing to rewrite.
+fix:
+	@out=$$(go fix -diff ./...); if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
+
+check: vet fix test
 	@test -z "$$(gofmt -l cmd internal)"
+
+# Rewrite the golden help pages after an intended change; review the diff.
+# The contract files have their own switch: GWT_CONTRACT_UPDATE=1.
+golden:
+	CLIKIT_UPDATE=1 go test ./cmd/gwt -run TestHelpPages

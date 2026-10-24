@@ -1,0 +1,27 @@
+Usage: gwt path [<branch>] [flags]
+
+Print where create would place a branch, without creating anything.
+
+Prints the absolute path create would place the branch at, without fetching,
+creating anything, or checking that the slot is free. The path follows the
+configuration, so it can differ from where an existing checkout of the branch
+lives; gwt list shows those.
+
+Arguments:
+  <branch>      The branch whose path to print; without it, the root this repository's worktrees go
+                under (optional).
+
+Flags:
+      --json    Print one JSON object instead of the path.
+
+Inherited flags:
+  -h, --help    Show context-sensitive help.
+
+JSON:
+  One object: path, the absolute path.
+
+Exit codes:
+  0    success
+  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
+       after printing every target's result
+  2    invalid arguments; nothing was run

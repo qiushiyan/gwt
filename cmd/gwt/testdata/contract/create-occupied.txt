@@ -1,5 +1,5 @@
 $ gwt create --non-interactive feat/plain
 --- stdout
 --- stderr
-gwt: path already exists: $HOME/dev/.worktrees/project/feat/plain (nothing removed)
+gwt: error: path already exists: $HOME/dev/.worktrees/project/feat/plain (nothing removed)
 --- exit 1

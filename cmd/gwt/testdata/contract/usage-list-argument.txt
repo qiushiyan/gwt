@@ -1,5 +1,7 @@
 $ gwt list x
 --- stdout
 --- stderr
-gwt: list takes no arguments
+gwt: error: unexpected argument x
+Usage: gwt list [flags]
+Run "gwt list --help" for details.
 --- exit 2

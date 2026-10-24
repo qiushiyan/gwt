@@ -1,0 +1,40 @@
+Usage: gwt config show [flags]
+
+Print the effective configuration and the file each value came from.
+
+Works outside a repository too, where it shows the global layer only.
+
+Inherited flags:
+      --json    Print one JSON object instead of text.
+  -h, --help    Show context-sensitive help.
+
+Configuration:
+  Global defaults live in $XDG_CONFIG_HOME/gwt/config.toml (normally
+  ~/.config/gwt/config.toml); GWT_CONFIG names another file instead, which must
+  exist. gwt.toml in the shared Git directory (usually .git/gwt.toml) overrides them
+  for one repository and all its worktrees. Command-line arguments win over both.
+
+    base           where create forks a new branch: HEAD (the caller's current
+                   commit, which create asks about first unless --non-interactive)
+                   or a ref such as origin/main
+    worktree_root  the directory checkouts go under: absolute, or ~/...
+    copy_globs     basename patterns of ignored files create copies from the main
+                   checkout; an array replaces the inherited one, and [] copies nothing
+    fetch.max_age  how old the last fetch may be before create, or --fetch, fetches
+                   again, e.g. "5m"
+    fetch.timeout  the deadline for that fetch, e.g. "8s"
+    recovery.keep  how long remove's recovery refs last, e.g. "30d"; "0" keeps them
+
+  An invalid value or an unknown key fails every command that reads the file.
+
+JSON:
+  One object: base, worktree_root, copy_globs, fetch (max_age, timeout) and
+  recovery (keep) as above, durations in seconds; sources, the file each key came
+  from or "builtin"; files, the global path and, inside a repository, the
+  repository path.
+
+Exit codes:
+  0    success
+  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
+       after printing every target's result
+  2    invalid arguments; nothing was run

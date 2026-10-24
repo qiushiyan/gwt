@@ -1,5 +1,5 @@
 $ gwt list --json
 --- stdout
 --- stderr
-gwt: not inside a Git working tree: $HOME
+gwt: error: not inside a Git working tree: $HOME
 --- exit 1

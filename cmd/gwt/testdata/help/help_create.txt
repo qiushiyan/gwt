@@ -1,0 +1,67 @@
+Usage: gwt create <branch> [<base>] [flags]
+
+Check out a branch in its own worktree, creating the branch if needed, and print the path.
+
+Creates a checkout of <branch> and prints its absolute path. The branch is:
+  - an existing local branch, checked out as it is, with <base> unused;
+  - else a new local branch tracking the one remote branch of that name; when
+    several remotes have it, gwt refuses and prints the command that picks one;
+  - else a new branch, without upstream, forked from <base>. Without <base> it
+    forks from the configured base, and when that base is HEAD it asks on stderr
+    before forking from the caller's current commit, unless --non-interactive.
+
+Before treating a name as absent, gwt fetches every remote when no fetch has
+reached the repository within fetch.max_age, bounded by fetch.timeout. A failed
+fetch warns and uses the cached refs.
+
+The slot must be absent or an empty directory; anything else is refused, and
+nothing is deleted. Ignored files in the main checkout whose names match
+copy_globs (gwt config show lists them) are copied in. A failed copy is only a
+warning: the checkout and its path stand, so do not retry the creation.
+
+When stderr is a terminal the path also goes to the clipboard (toclip, else
+pbcopy). A caller that captures stderr, as agents do, leaves the clipboard alone.
+
+Arguments:
+  <branch>                 The branch to check out; created when no local or remote branch has the
+                           name.
+  <base>                   Where a new branch forks from; unused when the branch exists. Default:
+                           the configured base (optional).
+
+Flags:
+  -n, --non-interactive    Fork a new branch from the configured base without asking, even when that
+                           base is HEAD. Agents and scripts pass this.
+      --new                Create a new branch even when a remote branch has the name; an existing
+                           local branch is still checked out as it is.
+      --no-copy            Copy no ignored files from the main checkout into the new one.
+      --no-clipboard       Leave the clipboard alone at a terminal.
+      --no-fetch           Decide from cached remote refs, without fetching.
+      --cd                 Enter the new checkout in the calling shell. Only the zsh gwt function
+                           from dotfiles can, so the binary refuses this flag.
+      --json               Print one JSON object instead of the path.
+
+Inherited flags:
+  -h, --help               Show context-sensitive help.
+
+JSON:
+  One object:
+    path      the checkout's absolute path
+    branch    the branch checked out
+    action    created (a new branch), local (an existing local branch), or remote
+              (a new branch tracking the remote one)
+    base      what a created branch forked from; absent otherwise
+    upstream  the remote branch tracked, such as origin/x; absent unless remote
+    copied    how many ignored files were copied in
+    warnings  why files could not be copied; absent when none failed
+
+Examples:
+  gwt fix/login main               # fork from main, no question asked
+  gwt feat/search                  # fork from HEAD after confirming at a terminal
+  gwt create -n feat/agent-work    # unattended: stdout is only the path
+  gwt create -n feat/x main --json
+
+Exit codes:
+  0    success
+  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
+       after printing every target's result
+  2    invalid arguments; nothing was run

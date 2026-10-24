@@ -11,14 +11,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alecthomas/kong"
 	"golang.org/x/term"
 )
 
-// attended reports whether a person is watching: stderr, where prompts go, is
-// a terminal. Agents and scripts capture it, so they keep their clipboard.
-// /dev/null is a character device too, hence a real terminal check.
-var attended = func(stderr io.Writer) bool {
-	f, ok := stderr.(*os.File)
+// attended says whether a person is watching: stderr, where prompts go, is a
+// terminal. Agents and scripts capture it, so they keep their clipboard. Tests
+// bind their own.
+type attended bool
+
+func watching(k *kong.Context) (attended, error) { return attended(terminal(k.Stderr)), nil }
+
+// terminal is a real terminal check: /dev/null is a character device too.
+func terminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 

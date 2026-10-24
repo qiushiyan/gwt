@@ -1,5 +1,7 @@
 $ gwt --cd -n x
 --- stdout
 --- stderr
-gwt: --cd needs the zsh gwt function from dotfiles; the binary cannot change your shell's directory. Run zshreload, or use: cd "$(gwt create <branch>)"
+gwt: error: --cd needs the zsh gwt function from dotfiles; the binary cannot change your shell's directory. Run zshreload, or use: cd "$(gwt create <branch>)"
+Usage: gwt create <branch> [<base>] [flags]
+Run "gwt create --help" for details.
 --- exit 2

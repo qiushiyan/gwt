@@ -1,0 +1,20 @@
+Usage: gwt config <command> [flags]
+
+Inspect gwt's configuration.
+
+Flags:
+      --json    Print one JSON object instead of text.
+
+Inherited flags:
+  -h, --help    Show context-sensitive help.
+
+Commands:
+  show    Print the effective configuration and the file each value came from.
+
+Exit codes:
+  0    success
+  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
+       after printing every target's result
+  2    invalid arguments; nothing was run
+
+Run "gwt config <command> --help" for a command's details.

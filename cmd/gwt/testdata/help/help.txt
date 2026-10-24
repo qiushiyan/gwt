@@ -1,0 +1,60 @@
+Usage: gwt [<command>]
+   or: gwt <branch> [<base>] [flags]
+
+gwt creates and removes Git worktrees under one placement policy, and judges whether branches are merged into the trunk.
+
+A branch's worktree lives at <worktree_root>/<name of the main checkout>/<branch>.
+Git owns repository state; gwt owns where checkouts go, what is copied into them,
+and when one may be removed. Create and remove worktrees through gwt rather than
+git worktree, so every checkout follows the same placement and removal rules.
+
+The first word is the command; anything else there is a branch for create, so
+"gwt feat/x main" creates feat/x from main. To create a branch named like a
+command, write "gwt create list".
+
+stdout carries only the result: a path, one line per item, or with --json one JSON
+document (remove prints one JSON object per line, one per target). Progress,
+warnings and the confirmation prompt go to stderr. gwt never changes the caller's
+directory; agents use the printed path as their working directory.
+
+Flags:
+  -h, --help               Show context-sensitive help.
+
+Arguments and flags of create, the default command:
+  <branch>                 The branch to check out; created when no local or remote branch has the
+                           name.
+  <base>                   Where a new branch forks from; unused when the branch exists. Default:
+                           the configured base (optional).
+  -n, --non-interactive    Fork a new branch from the configured base without asking, even when that
+                           base is HEAD. Agents and scripts pass this.
+      --new                Create a new branch even when a remote branch has the name; an existing
+                           local branch is still checked out as it is.
+      --no-copy            Copy no ignored files from the main checkout into the new one.
+      --no-clipboard       Leave the clipboard alone at a terminal.
+      --no-fetch           Decide from cached remote refs, without fetching.
+      --cd                 Enter the new checkout in the calling shell. Only the zsh gwt function
+                           from dotfiles can, so the binary refuses this flag.
+      --json               Print one JSON object instead of the path.
+
+Commands:
+  create <branch> [<base>]    Check out a branch in its own worktree, creating the branch if needed,
+                              and print the path (default).
+  resolve <branch>            Say how create would obtain a branch: local, remote, ambiguous or
+                              absent.
+  path [<branch>]             Print where create would place a branch, without creating anything.
+  remove <target> ...         Remove checkouts and their branches, keeping a recovery ref for
+                              anything discarded.
+  list                        List every worktree with its changes and whether its branch is merged
+                              into the trunk.
+  merged <target> ...         Judge whether branches or commits are merged into the trunk.
+  trunk                       Print the trunk: the branch work lands on, which merge verdicts
+                              measure against.
+  config show                 Print the effective configuration and the file each value came from.
+
+Exit codes:
+  0    success
+  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
+       after printing every target's result
+  2    invalid arguments; nothing was run
+
+Run "gwt <command> --help" for a command's details.

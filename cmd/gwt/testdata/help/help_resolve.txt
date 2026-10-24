@@ -1,0 +1,31 @@
+Usage: gwt resolve <branch> [flags]
+
+Say how create would obtain a branch: local, remote, ambiguous or absent.
+
+Prints one line:
+  local                      a local branch has the name
+  remote <ref>               one remote branch has it, such as refs/remotes/origin/x
+  ambiguous <ref> <ref>...   several remotes have it
+  absent                     none has it; create would fork a new branch
+An absent name triggers the fetch create would make, so without --no-fetch this
+may contact remotes.
+
+Arguments:
+  <branch>          The branch name to look up.
+
+Flags:
+      --no-fetch    Decide from cached remote refs, without fetching: a read-only probe.
+      --json        Print one JSON object instead of the line.
+
+Inherited flags:
+  -h, --help        Show context-sensitive help.
+
+JSON:
+  One object: kind, one of local, remote, ambiguous or absent; refs, the remote
+  refs that have the name, absent for local and absent.
+
+Exit codes:
+  0    success
+  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
+       after printing every target's result
+  2    invalid arguments; nothing was run

@@ -1,0 +1,77 @@
+Usage: gwt remove <target> ... [flags]
+
+Remove checkouts and their branches, keeping a recovery ref for anything discarded.
+
+Runs without prompting. Several targets form one batch, and a failed target
+does not stop the others.
+
+Always refused: the main checkout, the one you are in, a locked one, and one that
+holds another worktree. Refused unless --discard-dirty: uncommitted, untracked or
+index-hidden changes, or a status that cannot be read. Refused unless --force or
+--keep-branch: a branch not merged into the trunk, judged after fetching a remote
+trunk that no fetch has reached within fetch.max_age, so a pull request merged
+minutes ago counts. gwt list's removable applies the same rules. A target whose
+commit or changes moved while gwt checked it is refused; stop any process still
+working in a checkout before removing it.
+
+Nothing is discarded without a recovery ref under refs/wt-trash/<batch>/: the
+snapshot --discard-dirty takes (shaped like a stash: first parent HEAD, second a
+commit of the index, ignored files left out), the tip --force deletes, or a
+removed detached checkout's HEAD. Restore one with git branch <name> <ref>. Refs
+older than recovery.keep expire on each removal. Ignored files go with the
+checkout, which moves to <worktree_root>/.trash and is deleted in the background.
+
+Text: what was removed and any ref kept, on stdout; each failed target on stderr
+as "gwt: error: <target>: <reason>". The command exits 1 when any target failed.
+
+Arguments:
+  <target> ...                A branch (its registered checkout, or the branch alone when it has
+                              none) or a checkout path, absolute or starting with ./, which reaches
+                              detached checkouts.
+
+Flags:
+      --force                 Delete a branch that is not merged into the trunk; its tip is kept as
+                              a recovery ref.
+      --discard-dirty         Remove a checkout that holds changes, after snapshotting them to a
+                              recovery ref.
+      --keep-branch           Remove only the checkout and keep its branch, so no merge verdict is
+                              needed.
+      --expect-head=COMMIT    Refuse unless the one target is still at COMMIT. Pass the commit you
+                              judged, so work committed since cannot be lost.
+      --json                  Print one JSON object per target, one per line, instead of text.
+
+Inherited flags:
+  -h, --help                  Show context-sensitive help.
+
+JSON:
+  One object per line, one per target, in order, success or not; a failure is
+  also reported on stderr:
+    ok                true when everything asked for this target was done
+    target            the target as given
+    path              the checkout; absent for a branch without one
+    branch            the branch; "" for a detached checkout
+    worktree_removed  true once the checkout is gone, even when a later step failed
+    branch_deleted    true when the branch was deleted
+    recovery_ref      the ref keeping what was discarded; absent when nothing was
+    error             why the target failed; absent on success
+  With worktree_removed true, branch_deleted false and an error, the checkout is
+  gone and its branch remains: inspect the branch before deleting it by hand.
+
+The trunk and merge verdicts:
+  The trunk is where work lands: the first of origin/HEAD, origin/main,
+  origin/master, main and master that exists, else the main checkout's branch. It
+  is not create's base, which only says where a new branch forks from.
+
+  A branch is merged into the trunk when the trunk contains its commits, when one
+  trunk commit carries its combined change (a squash merge), or when trunk commits
+  carry each of its commits' changes (a rebase). A change match also needs a clean
+  merge that leaves the trunk's contents exactly as they are. A branch with merge
+  commits of its own, or whose lines the trunk edited again later, may stay
+  unconfirmed. A branch with no commits of its own counts as merged: it holds
+  nothing to lose.
+
+Exit codes:
+  0    success
+  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
+       after printing every target's result
+  2    invalid arguments; nothing was run

@@ -1,5 +1,7 @@
 $ gwt 
 --- stdout
 --- stderr
-gwt: branch name required (see gwt --help)
+gwt: error: expected "<branch>"
+Usage: gwt create <branch> [<base>] [flags]
+Run "gwt create --help" for details.
 --- exit 2

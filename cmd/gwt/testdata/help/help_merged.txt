@@ -1,0 +1,57 @@
+Usage: gwt merged <target> ... [flags]
+
+Judge whether branches or commits are merged into the trunk.
+
+Prints whether each target's work is in the trunk: one line per target,
+"merged<TAB><target>" or "unmerged<TAB><target>", in order. A full commit id,
+such as a detached checkout's HEAD, is judged as that commit. A target that
+cannot be judged is reported on stderr as "gwt: error: <target>: <reason>" (in
+JSON, by its error field), the rest are still judged, and the command exits 1.
+
+Without --fetch it reads cached remote refs and contacts no remote.
+
+Arguments:
+  <target> ...      Local branches, with or without a checkout, or full commit ids where no branch
+                    has the name.
+
+Flags:
+      --fetch       First fetch a remote trunk that no fetch has reached within fetch.max_age, so a
+                    merge made on the remote since counts.
+      --into=REV    Judge against REV instead of the trunk, such as a base you verified against the
+                    remote yourself; nothing is fetched.
+      --json        Print one JSON object instead of lines.
+
+Inherited flags:
+  -h, --help        Show context-sensitive help.
+
+Constraints:
+  At most one of --fetch, --into.
+
+JSON:
+  One object, printed even when a target fails:
+    trunk     what the verdicts were measured against, as gwt trunk --json prints
+              it; with --into, its name and commit are that revision
+    branches  one object per target, in order:
+      branch  the target as given
+      commit  the commit judged; absent when the target was not found
+      merged  whether it is merged; null when not found or when the check failed
+      error   why it could not be judged; absent otherwise
+
+The trunk and merge verdicts:
+  The trunk is where work lands: the first of origin/HEAD, origin/main,
+  origin/master, main and master that exists, else the main checkout's branch. It
+  is not create's base, which only says where a new branch forks from.
+
+  A branch is merged into the trunk when the trunk contains its commits, when one
+  trunk commit carries its combined change (a squash merge), or when trunk commits
+  carry each of its commits' changes (a rebase). A change match also needs a clean
+  merge that leaves the trunk's contents exactly as they are. A branch with merge
+  commits of its own, or whose lines the trunk edited again later, may stay
+  unconfirmed. A branch with no commits of its own counts as merged: it holds
+  nothing to lose.
+
+Exit codes:
+  0    success
+  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
+       after printing every target's result
+  2    invalid arguments; nothing was run

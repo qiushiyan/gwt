@@ -1,0 +1,44 @@
+Usage: gwt trunk [flags]
+
+Print the trunk: the branch work lands on, which merge verdicts measure against.
+
+Prints the trunk's name and commit, marked "(stale; --fetch refreshes)" when it
+is a remote branch no fetch has reached within fetch.max_age, "(fetched)" after
+--fetch refreshed it, or "(fetch failed; cached)" when that fetch failed, which
+also warns on stderr.
+
+Flags:
+      --fetch    First fetch the trunk if it is a remote branch that no fetch has reached within
+                 fetch.max_age.
+      --json     Print one JSON object instead of the line.
+
+Inherited flags:
+  -h, --help     Show context-sensitive help.
+
+JSON:
+  One object:
+    name         origin/<branch> for a remote trunk, else a local branch
+    commit       the commit verdicts are measured against
+    remote       the remote --fetch refreshes; absent for a local trunk
+    stale        true when no fetch has reached a remote trunk within fetch.max_age
+    fetched      true when --fetch fetched it; absent otherwise
+    fetch_error  why --fetch failed, leaving the cached trunk; absent otherwise
+
+The trunk and merge verdicts:
+  The trunk is where work lands: the first of origin/HEAD, origin/main,
+  origin/master, main and master that exists, else the main checkout's branch. It
+  is not create's base, which only says where a new branch forks from.
+
+  A branch is merged into the trunk when the trunk contains its commits, when one
+  trunk commit carries its combined change (a squash merge), or when trunk commits
+  carry each of its commits' changes (a rebase). A change match also needs a clean
+  merge that leaves the trunk's contents exactly as they are. A branch with merge
+  commits of its own, or whose lines the trunk edited again later, may stay
+  unconfirmed. A branch with no commits of its own counts as merged: it holds
+  nothing to lose.
+
+Exit codes:
+  0    success
+  1    failed, or a creation was declined; remove and merged also exit 1 when any target failed,
+       after printing every target's result
+  2    invalid arguments; nothing was run

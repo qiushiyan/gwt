@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/alecthomas/kong"
 )
 
 // Every command reads the same configuration: path and creation place by it,
@@ -104,12 +106,13 @@ func TestClipboard(t *testing.T) {
 		w.write(filepath.Join(w.home, "bin", "toclip"), "#!/bin/sh\n"+script, 0o755)
 	}
 	var errs string
+	watched := app
 	create := func(branch string, flags ...string) string {
 		t.Helper()
 		os.Remove(clip)
 		var out string
 		var code int
-		out, errs, code = w.run(append([]string{"create", "-n", branch}, flags...)...)
+		out, errs, code = w.runApp(watched, append([]string{"create", "-n", branch}, flags...)...)
 		if code != 0 {
 			t.Fatalf("%s: %d %s", branch, code, errs)
 		}
@@ -146,8 +149,8 @@ func TestClipboard(t *testing.T) {
 	defer r.Close()
 	defer pw.Close()
 	for _, stream := range []io.Writer{&strings.Builder{}, devNull, pw} {
-		if attended(stream) {
-			t.Fatalf("attended(%T)", stream)
+		if terminal(stream) {
+			t.Fatalf("terminal(%T)", stream)
 		}
 	}
 	create("captured")
@@ -155,8 +158,9 @@ func TestClipboard(t *testing.T) {
 		t.Fatalf("captured stderr copied %q", got)
 	}
 
-	defer func(before func(io.Writer) bool) { attended = before }(attended)
-	attended = func(io.Writer) bool { return true }
+	// A person at the terminal, as a later binding of the same type.
+	watched = app
+	watched.Options = append(slices.Clone(app.Options), kong.Bind(attended(true)))
 	if path := create("watched", "--json"); copied() != path {
 		t.Fatalf("clipboard %q, want %q", copied(), path)
 	}

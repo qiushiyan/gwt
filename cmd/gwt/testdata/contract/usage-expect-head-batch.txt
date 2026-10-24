@@ -1,5 +1,7 @@
 $ gwt remove a b --expect-head HEAD
 --- stdout
 --- stderr
-gwt: --expect-head takes exactly one target
+gwt: error: --expect-head takes exactly one target
+Usage: gwt remove <target> ... [flags]
+Run "gwt remove --help" for details.
 --- exit 2

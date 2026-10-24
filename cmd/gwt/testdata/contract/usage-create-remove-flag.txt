@@ -1,5 +1,7 @@
 $ gwt create a --force
 --- stdout
 --- stderr
-gwt: --force, --discard-dirty, --keep-branch and --expect-head are only for remove
+gwt: error: unknown flag --force
+Usage: gwt create <branch> [<base>] [flags]
+Run "gwt create --help" for details.
 --- exit 2

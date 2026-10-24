@@ -1,13 +1,14 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/qiushiyan/clikit"
+	"github.com/qiushiyan/clikit/clikittest"
 )
 
 // world is one test's sandbox: a temporary HOME holding a repository, with
@@ -56,9 +57,14 @@ func newWorld(t *testing.T) *world {
 
 // run calls gwt as main does and returns what it printed and its status.
 func (w *world) run(args ...string) (stdout, stderr string, code int) {
-	var out, errs bytes.Buffer
-	code = run(context.Background(), args, strings.NewReader(w.stdin), &out, &errs)
-	return out.String(), errs.String(), code
+	return w.runApp(app, args...)
+}
+
+// runApp is run with an App of the test's own, such as one binding a seam.
+func (w *world) runApp(a clikit.App, args ...string) (stdout, stderr string, code int) {
+	a.Stdin = strings.NewReader(w.stdin)
+	r := clikittest.Run(a, dispatch(args)...)
+	return r.Stdout, r.Stderr, r.Code
 }
 
 func (w *world) git(dir string, args ...string) string {

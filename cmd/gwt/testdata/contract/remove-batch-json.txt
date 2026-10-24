@@ -4,7 +4,7 @@ $ gwt remove --json gone/a feat/plain ./gone-b
 {"ok":false,"target":"feat/plain","path":"$HOME/dev/.worktrees/project/feat/plain","branch":"feat/plain","worktree_removed":false,"branch_deleted":false,"error":"worktree has uncommitted, untracked, or index-hidden changes: $HOME/dev/.worktrees/project/feat/plain; commit or move them, or pass --discard-dirty to snapshot them to a recovery ref"}
 {"ok":false,"target":"./gone-b","branch":"","worktree_removed":false,"branch_deleted":false,"error":"no registered worktree at $HOME/project/gone-b; inspect git worktree list"}
 --- stderr
-gwt: gone/a: no registered worktree or local branch "gone/a"; inspect git worktree list and git branch --list before choosing a cleanup action
-gwt: feat/plain: worktree has uncommitted, untracked, or index-hidden changes: $HOME/dev/.worktrees/project/feat/plain; commit or move them, or pass --discard-dirty to snapshot them to a recovery ref
-gwt: ./gone-b: no registered worktree at $HOME/project/gone-b; inspect git worktree list
+gwt: error: gone/a: no registered worktree or local branch "gone/a"; inspect git worktree list and git branch --list before choosing a cleanup action
+gwt: error: feat/plain: worktree has uncommitted, untracked, or index-hidden changes: $HOME/dev/.worktrees/project/feat/plain; commit or move them, or pass --discard-dirty to snapshot them to a recovery ref
+gwt: error: ./gone-b: no registered worktree at $HOME/project/gone-b; inspect git worktree list
 --- exit 1

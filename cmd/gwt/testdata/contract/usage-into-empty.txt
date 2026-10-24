@@ -1,5 +1,7 @@
 $ gwt merged --into= landed
 --- stdout
 --- stderr
-gwt: --into needs a revision
+gwt: error: --into: an empty revision names nothing
+Usage: gwt merged <target> ... [flags]
+Run "gwt merged --help" for details.
 --- exit 2

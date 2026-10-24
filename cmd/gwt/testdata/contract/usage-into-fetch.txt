@@ -1,5 +1,7 @@
 $ gwt merged landed --into main --fetch
 --- stdout
 --- stderr
-gwt: --into is only for merged, without --fetch: the caller owns that revision's freshness
+gwt: error: --fetch and --into can't be used together
+Usage: gwt merged <target> ... [flags]
+Run "gwt merged --help" for details.
 --- exit 2
