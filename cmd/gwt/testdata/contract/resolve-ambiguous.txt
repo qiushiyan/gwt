@@ -1,0 +1,5 @@
+$ gwt resolve twice
+--- stdout
+ambiguous refs/remotes/fork/twice refs/remotes/origin/twice
+--- stderr
+--- exit 0

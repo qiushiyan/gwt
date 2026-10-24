@@ -1,0 +1,8 @@
+$ gwt remove x ./y --json
+--- stdout
+{"ok":false,"target":"x","branch":"","worktree_removed":false,"branch_deleted":false,"error":"not inside a Git working tree: $HOME"}
+{"ok":false,"target":"./y","branch":"","worktree_removed":false,"branch_deleted":false,"error":"not inside a Git working tree: $HOME"}
+--- stderr
+gwt: x: not inside a Git working tree: $HOME
+gwt: ./y: not inside a Git working tree: $HOME
+--- exit 1

@@ -1,0 +1,5 @@
+$ gwt remove feat/new --json
+--- stdout
+{"ok":true,"target":"feat/new","path":"$HOME/dev/.worktrees/project/feat/new","branch":"feat/new","worktree_removed":true,"branch_deleted":true}
+--- stderr
+--- exit 0

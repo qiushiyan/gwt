@@ -1,0 +1,7 @@
+$ gwt create --non-interactive feat/new main --new --json
+--- stdout
+{"path":"$HOME/dev/.worktrees/project/feat/new","branch":"feat/new","action":"created","base":"main","copied":1}
+--- stderr
+gwt: creating branch "feat/new" from "main"
+gwt: copied 1 item(s) from main
+--- exit 0

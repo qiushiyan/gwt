@@ -1,0 +1,5 @@
+$ gwt remove --json --keep-branch --discard-dirty $HOME/dev/.worktrees/project/feat/plain
+--- stdout
+{"ok":true,"target":"$HOME/dev/.worktrees/project/feat/plain","path":"$HOME/dev/.worktrees/project/feat/plain","branch":"feat/plain","worktree_removed":true,"branch_deleted":false,"recovery_ref":"refs/wt-trash/<batch>/001-feat-plain"}
+--- stderr
+--- exit 0

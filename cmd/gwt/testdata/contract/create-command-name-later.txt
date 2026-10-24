@@ -1,0 +1,7 @@
+$ gwt -n remove landed
+--- stdout
+$HOME/dev/.worktrees/project/remove
+--- stderr
+gwt: creating branch "remove" from "landed"
+gwt: copied 1 item(s) from main
+--- exit 0

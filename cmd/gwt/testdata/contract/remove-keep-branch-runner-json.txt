@@ -1,0 +1,5 @@
+$ gwt remove --keep-branch --expect-head 203de7f81058e4813181f46de90a6bde6e0df894 --json $HOME/dev/.worktrees/project/remote-only
+--- stdout
+{"ok":true,"target":"$HOME/dev/.worktrees/project/remote-only","path":"$HOME/dev/.worktrees/project/remote-only","branch":"remote-only","worktree_removed":true,"branch_deleted":false}
+--- stderr
+--- exit 0

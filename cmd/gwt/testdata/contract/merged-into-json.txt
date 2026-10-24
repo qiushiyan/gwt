@@ -1,0 +1,5 @@
+$ gwt merged --json --into 9f9a7253a55146152a231985e891c89b604c0c30 dd51b67a18efd1d8f3577319539ef7453b829b8c
+--- stdout
+{"trunk":{"name":"9f9a7253a55146152a231985e891c89b604c0c30","commit":"9f9a7253a55146152a231985e891c89b604c0c30","stale":false},"branches":[{"branch":"dd51b67a18efd1d8f3577319539ef7453b829b8c","commit":"dd51b67a18efd1d8f3577319539ef7453b829b8c","merged":true}]}
+--- stderr
+--- exit 0

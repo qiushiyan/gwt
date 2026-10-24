@@ -1,0 +1,6 @@
+$ gwt merged landed nope
+--- stdout
+merged	landed
+--- stderr
+gwt: nope: no local branch nope
+--- exit 1

@@ -1,0 +1,5 @@
+$ gwt remove a b --expect-head HEAD
+--- stdout
+--- stderr
+gwt: --expect-head takes exactly one target
+--- exit 2

@@ -1,0 +1,13 @@
+$ gwt config show
+--- stdout
+Global: $HOME/config/gwt/config.toml
+Repository: $HOME/project/.git/gwt.toml
+
+base = "HEAD"  (builtin)
+worktree_root = "$HOME/dev/.worktrees"  (builtin)
+copy_globs = [".env*" ".npmrc" "scripts.local" ".duet" "docs.local"]  (builtin)
+fetch.max_age = 5m0s  (builtin)
+fetch.timeout = 8s  (builtin)
+recovery.keep = 720h0m0s  (builtin)
+--- stderr
+--- exit 0

@@ -1,0 +1,5 @@
+$ gwt list --json
+--- stdout
+{"trunk":{"name":"origin/main","commit":"9f9a7253a55146152a231985e891c89b604c0c30","remote":"origin","stale":false},"worktrees":[{"path":"$HOME/project","branch":"main","head":"0de5aa6465a0d2e0fe8b762398f9ea39c4d0e088","main":true,"current":true,"locked":false,"prunable":false,"dirty":false,"merged":true,"removable":false},{"path":"$HOME/dev/.worktrees/project/broken","branch":"broken","head":"0de5aa6465a0d2e0fe8b762398f9ea39c4d0e088","main":false,"current":false,"locked":false,"prunable":false,"dirty":true,"merged":null,"removable":false,"error":"git status: exit status 128: fatal: error opening '$HOME/dev/.worktrees/project/broken/.git': Permission denied"},{"path":"$HOME/dev/.worktrees/project/feat/bare","branch":"feat/bare","head":"0de5aa6465a0d2e0fe8b762398f9ea39c4d0e088","main":false,"current":false,"locked":true,"prunable":false,"dirty":false,"merged":true,"removable":false}]}
+--- stderr
+--- exit 0

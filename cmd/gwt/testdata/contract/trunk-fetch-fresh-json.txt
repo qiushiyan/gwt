@@ -1,0 +1,5 @@
+$ gwt trunk --fetch --json
+--- stdout
+{"name":"origin/main","commit":"9f9a7253a55146152a231985e891c89b604c0c30","remote":"origin","stale":false}
+--- stderr
+--- exit 0

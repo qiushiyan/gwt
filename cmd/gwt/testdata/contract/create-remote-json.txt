@@ -1,0 +1,7 @@
+$ gwt create --non-interactive remote-only --json
+--- stdout
+{"path":"$HOME/dev/.worktrees/project/remote-only","branch":"remote-only","action":"remote","upstream":"origin/remote-only","copied":1}
+--- stderr
+gwt: checking out "remote-only", tracking origin/remote-only (base unused)
+gwt: copied 1 item(s) from main
+--- exit 0

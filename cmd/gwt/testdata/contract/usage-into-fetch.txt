@@ -1,0 +1,5 @@
+$ gwt merged landed --into main --fetch
+--- stdout
+--- stderr
+gwt: --into is only for merged, without --fetch: the caller owns that revision's freshness
+--- exit 2

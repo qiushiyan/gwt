@@ -1,0 +1,11 @@
+$ gwt list
+--- stdout
+trunk origin/main 9f9a7253a551
+»  main         $HOME/project                             main merged
+   feat/bare    $HOME/dev/.worktrees/project/feat/bare    merged locked
+   feat/new     $HOME/dev/.worktrees/project/feat/new     merged
+ * feat/plain   $HOME/dev/.worktrees/project/feat/plain   merged
+   open         $HOME/dev/.worktrees/project/open         
+   remote-only  $HOME/dev/.worktrees/project/remote-only  
+--- stderr
+--- exit 0

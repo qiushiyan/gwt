@@ -1,0 +1,5 @@
+$ gwt resolve remote-only
+--- stdout
+remote refs/remotes/origin/remote-only
+--- stderr
+--- exit 0

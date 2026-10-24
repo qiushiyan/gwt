@@ -1,0 +1,5 @@
+$ gwt resolve nothing-here
+--- stdout
+absent
+--- stderr
+--- exit 0

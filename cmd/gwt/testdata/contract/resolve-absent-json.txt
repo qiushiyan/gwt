@@ -1,0 +1,5 @@
+$ gwt resolve nothing-here --no-fetch --json
+--- stdout
+{"kind":"absent"}
+--- stderr
+--- exit 0

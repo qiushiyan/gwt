@@ -1,0 +1,5 @@
+$ gwt list x
+--- stdout
+--- stderr
+gwt: list takes no arguments
+--- exit 2

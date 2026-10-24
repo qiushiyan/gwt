@@ -1,0 +1,5 @@
+$ gwt path
+--- stdout
+$HOME/dev/.worktrees/project
+--- stderr
+--- exit 0

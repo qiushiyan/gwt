@@ -1,0 +1,6 @@
+$ gwt merged landed open
+--- stdout
+merged	landed
+unmerged	open
+--- stderr
+--- exit 0

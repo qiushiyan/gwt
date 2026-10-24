@@ -1,0 +1,5 @@
+$ gwt decline
+--- stdout
+--- stderr
+gwt: fork "decline" from current HEAD (main)? [y/N] gwt: aborted; pass a base or --non-interactive to create without confirmation
+--- exit 1

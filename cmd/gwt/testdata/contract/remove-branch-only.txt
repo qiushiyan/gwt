@@ -1,0 +1,5 @@
+$ gwt remove squashed
+--- stdout
+Deleted branch squashed
+--- stderr
+--- exit 0

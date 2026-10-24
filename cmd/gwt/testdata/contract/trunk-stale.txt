@@ -1,0 +1,5 @@
+$ gwt trunk
+--- stdout
+origin/main 9f9a7253a551 (stale; --fetch refreshes)
+--- stderr
+--- exit 0

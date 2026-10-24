@@ -1,0 +1,5 @@
+$ gwt config show --json
+--- stdout
+{"base":"HEAD","worktree_root":"$HOME/dev/.worktrees","copy_globs":[".env*",".npmrc","scripts.local",".duet","docs.local"],"fetch":{"max_age":300,"timeout":8},"recovery":{"keep":2592000},"sources":{"base":"builtin","copy_globs":"builtin","fetch.max_age":"builtin","fetch.timeout":"builtin","recovery.keep":"builtin","worktree_root":"builtin"},"files":{"global":"$HOME/config/gwt/config.toml"}}
+--- stderr
+--- exit 0

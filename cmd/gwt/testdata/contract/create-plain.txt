@@ -1,0 +1,7 @@
+$ gwt create --non-interactive feat/plain
+--- stdout
+$HOME/dev/.worktrees/project/feat/plain
+--- stderr
+gwt: creating branch "feat/plain" from "main"
+gwt: copied 1 item(s) from main
+--- exit 0

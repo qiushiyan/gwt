@@ -1,0 +1,5 @@
+$ gwt create a --force
+--- stdout
+--- stderr
+gwt: --force, --discard-dirty, --keep-branch and --expect-head are only for remove
+--- exit 2

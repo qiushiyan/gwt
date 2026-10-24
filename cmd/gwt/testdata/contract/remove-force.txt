@@ -1,0 +1,6 @@
+$ gwt remove done --force
+--- stdout
+Removed worktree $HOME/dev/.worktrees/project/done and branch done
+Kept refs/wt-trash/<batch>/001-done; restore with: git branch <name> refs/wt-trash/<batch>/001-done
+--- stderr
+--- exit 0

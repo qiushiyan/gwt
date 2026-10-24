@@ -1,0 +1,7 @@
+$ gwt feat/bare main
+--- stdout
+$HOME/dev/.worktrees/project/feat/bare
+--- stderr
+gwt: creating branch "feat/bare" from "main"
+gwt: copied 1 item(s) from main
+--- exit 0

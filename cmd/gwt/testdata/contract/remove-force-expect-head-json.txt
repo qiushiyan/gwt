@@ -1,0 +1,5 @@
+$ gwt remove open --force --expect-head f8539cb36feb16b864419b7137db8e198cf5a77a --json
+--- stdout
+{"ok":true,"target":"open","path":"$HOME/dev/.worktrees/project/open","branch":"open","worktree_removed":true,"branch_deleted":true,"recovery_ref":"refs/wt-trash/<batch>/001-open"}
+--- stderr
+--- exit 0

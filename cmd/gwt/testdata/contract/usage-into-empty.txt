@@ -1,0 +1,5 @@
+$ gwt merged --into= landed
+--- stdout
+--- stderr
+gwt: --into needs a revision
+--- exit 2

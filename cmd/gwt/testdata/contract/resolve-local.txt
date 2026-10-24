@@ -1,0 +1,5 @@
+$ gwt resolve open
+--- stdout
+local
+--- stderr
+--- exit 0

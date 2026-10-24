@@ -1,0 +1,5 @@
+$ gwt create --non-interactive twice
+--- stdout
+--- stderr
+gwt: "twice" exists on multiple remotes: refs/remotes/fork/twice, refs/remotes/origin/twice; select one with git branch --track twice <remote>/twice, then retry
+--- exit 1

@@ -1,0 +1,6 @@
+$ gwt create -n --no-copy open main
+--- stdout
+$HOME/dev/.worktrees/project/open
+--- stderr
+gwt: checking out existing local branch "open" (base unused)
+--- exit 0

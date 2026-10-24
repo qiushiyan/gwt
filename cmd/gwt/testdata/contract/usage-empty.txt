@@ -1,0 +1,5 @@
+$ gwt 
+--- stdout
+--- stderr
+gwt: branch name required (see gwt --help)
+--- exit 2

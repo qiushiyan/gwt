@@ -1,0 +1,5 @@
+$ gwt remove feat/bare
+--- stdout
+--- stderr
+gwt: feat/bare: worktree is locked: $HOME/dev/.worktrees/project/feat/bare; unlock it explicitly before removal
+--- exit 1
