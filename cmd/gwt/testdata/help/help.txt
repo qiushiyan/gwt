@@ -1,4 +1,4 @@
-Usage: gwt [<command>]
+Usage: gwt <command>
    or: gwt <branch> [<base>] [flags]
 
 gwt creates and removes Git worktrees under one placement policy, and judges whether branches are merged into the trunk.
