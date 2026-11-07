@@ -2,7 +2,7 @@
 
 gwt places Git worktrees and decides when one may be removed. A person calls it
 through the zsh `gwt` function; the tmux popup, brief, drive, rex-worktree, the
-`/wt` mod and the clean-worktrees and enter-worktree skills run the binary and
+worktree mod and the clean-worktrees skill run the binary and
 read its output, so it is the one placement policy and the one removal engine
 they share. `README.md` owns the design; read it before changing behaviour.
 
@@ -11,8 +11,8 @@ they share. `README.md` owns the design; read it before changing behaviour.
   Dependencies: the standard library, clikit and Kong, plus BurntSushi/toml
   for the config files and x/term for the terminal check.
 - **Contracts other repositories depend on:** `create`'s path line or JSON
-  (popup, rex-worktree, `/wt`, enter-worktree, brief); `resolve`'s line and
-  `path` (brief); `list --json` and `trunk --fetch --json` (popup,
+  (popup, rex-worktree, the worktree mod, brief); `resolve`'s line and
+  `path` (brief, the worktree mod); `list --json` and `trunk --fetch --json` (popup,
   rex-worktree); `merged --json`, read even on exit 1 (drive, the
   clean-worktrees audit, popup); `remove --json`, one object per target, read
   even on exit 1, its `error` text matched by tests (popup, the clean-worktrees

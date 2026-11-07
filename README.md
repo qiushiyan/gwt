@@ -257,8 +257,8 @@ callers do.
 - rex-worktree and the `/wt` mod create through `gwt create --non-interactive`
   and take the path from the last line of its output; rex-worktree lists
   through `gwt list --json`.
-- The `enter-worktree` skill calls the installed binary and enters its returned
-  path.
+- The dotfiles worktree mod reads `gwt path` for the root a session follows a
+  new worktree under.
 
 Creation prints one path or one JSON object, and `resolve` one line or JSON
 object. Diagnostics and prompts use stderr; a failure reads
